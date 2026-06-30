@@ -99,8 +99,9 @@ export default function Sidebar() {
           }`}
       >
         {collapsed && !isMobile ? (
-          <div className="relative flex-shrink-0 flex h-8 w-8 items-center justify-center">
-            <Wifi className="h-5 w-5 text-blue-400 drop-shadow-sm" />
+          <div className="relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border border-white/10 bg-gradient-to-br from-rose-950/60 to-slate-900/80 shadow-sm">
+            <Wifi className="h-4.5 w-4.5 text-rose-400" strokeWidth={2.25} />
+            <span className="absolute bottom-1.5 h-1.5 w-1.5 rounded-full bg-rose-500" />
           </div>
         ) : (
           <Image

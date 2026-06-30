@@ -13,6 +13,10 @@ export const metadata: Metadata = {
   title: "HyperThings — Marketing Automation Dashboard",
   description:
     "Manage your social media automation workflow with HyperThings. Content calendar, approvals, competitor tracking, and analytics — all in one place.",
+  icons: {
+    icon: "/icon.svg",
+    apple: "/icon.svg",
+  },
 };
 
 export const viewport = {

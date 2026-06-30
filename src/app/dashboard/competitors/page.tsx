@@ -201,6 +201,24 @@ export default function CompetitorsPage() {
     });
   };
 
+  const toExternalUrl = (platform: string, handleOrUrl: string) => {
+    const value = handleOrUrl.trim();
+    if (!value) return "#";
+    if (/^https?:\/\//i.test(value)) return value;
+    if (value.startsWith("//")) return `https:${value}`;
+
+    if (platform === "Instagram") {
+      const handle = value.replace(/^@/, "");
+      return `https://www.instagram.com/${handle}`;
+    }
+
+    if (platform === "LinkedIn") {
+      return `https://${value.replace(/^\/+/, "")}`;
+    }
+
+    return `https://${value.replace(/^\/+/, "")}`;
+  };
+
   return (
     <div className="min-h-screen">
       <TopBar title="Competitors" />
@@ -305,10 +323,16 @@ export default function CompetitorsPage() {
                       </span>
                     </td>
                     <td className="px-5 py-5">
-                      <span className="inline-flex items-center gap-1 text-[13px] text-blue-600 hover:underline cursor-pointer">
+                      <a
+                        href={toExternalUrl(comp.platform, comp.handleOrUrl)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[13px] text-blue-600 hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {comp.handleOrUrl}
-                        <ExternalLink className="h-3 w-3" />
-                      </span>
+                        <ExternalLink className="h-3 w-3 shrink-0" />
+                      </a>
                     </td>
                     <td className="px-5 py-5">
                       <span
