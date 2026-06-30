@@ -205,9 +205,9 @@ export default function CompetitorsPage() {
     <div className="min-h-screen">
       <TopBar title="Competitors" />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-6 lg:p-8">
         {/* Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-12">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8 sm:mb-12">
           <StatCard
             label="Total competitors"
             value={visibleCompetitors.length}
@@ -238,7 +238,7 @@ export default function CompetitorsPage() {
         </div>
 
         {/* Header + Add Button */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
           <h3 className="text-[16px] font-semibold text-[var(--color-text-primary)]">
             Tracked competitors
           </h3>
@@ -252,8 +252,8 @@ export default function CompetitorsPage() {
         </div>
 
         {/* Competitors Table */}
-        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-visible animate-fade-in">
-          <table className="w-full">
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-x-auto animate-fade-in">
+          <table className="w-full min-w-[720px]">
             <thead>
               <tr className="border-b border-[var(--color-border)] bg-[var(--color-table-header)]">
                 <th className="text-left px-5 py-3 text-[12px] font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
@@ -375,12 +375,12 @@ export default function CompetitorsPage() {
 
       {/* Add Competitor Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => setShowAddModal(false)}
           />
-          <div className="relative w-full max-w-md rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-2xl animate-fade-in">
+          <div className="relative w-full max-w-md rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 sm:p-6 shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-[16px] font-semibold text-[var(--color-text-primary)]">
                 Add competitor

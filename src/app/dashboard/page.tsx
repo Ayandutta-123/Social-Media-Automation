@@ -161,9 +161,9 @@ export default function DashboardPage() {
     <div className="min-h-screen min-w-0">
       <TopBar title="Content calendar" />
 
-      <div className="p-8 min-w-0">
+      <div className="p-4 sm:p-6 lg:p-8 min-w-0">
         {/* Stats Row */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
           <StatCard
             label="Total posts"
             value={dashboardStats.totalPosts}
@@ -208,7 +208,7 @@ export default function DashboardPage() {
 
         {/* Recent Posts Section */}
         <div className="animate-fade-in" style={{ animationDelay: "0.25s" }}>
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
             <h3 className="text-[18px] font-bold text-[var(--color-text-primary)] tracking-tight">
               Recent posts
             </h3>
@@ -304,7 +304,7 @@ export default function DashboardPage() {
       {/* Post Detail Modal */}
       {selectedPost && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="post-detail-title"
@@ -313,12 +313,12 @@ export default function DashboardPage() {
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => setSelectedPost(null)}
           />
-          <div className="relative w-full max-w-3xl max-h-[85vh] rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl animate-fade-in overflow-hidden flex flex-col">
+          <div className="relative w-full sm:max-w-3xl max-h-[92vh] sm:max-h-[85vh] rounded-t-2xl sm:rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl animate-fade-in overflow-hidden flex flex-col">
             {/* Header */}
             <div className="relative shrink-0 flex flex-col">
               {/* Title Header */}
-              <div className="px-8 pt-8 pb-4 border-b border-[var(--color-border)] flex items-start justify-between">
-                <h3 className="text-[24px] font-extrabold text-black dark:text-white">Title</h3>
+              <div className="px-4 sm:px-8 pt-5 sm:pt-8 pb-4 border-b border-[var(--color-border)] flex items-start justify-between">
+                <h3 className="text-[20px] sm:text-[24px] font-extrabold text-black dark:text-white">Title</h3>
                 <button
                   onClick={() => setSelectedPost(null)}
                   className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-[var(--color-surface-hover)] transition-colors flex-shrink-0"
@@ -328,7 +328,7 @@ export default function DashboardPage() {
               </div>
 
               {/* Title Content */}
-              <div className="px-8 py-5 border-b border-[var(--color-border)]">
+              <div className="px-4 sm:px-8 py-4 sm:py-5 border-b border-[var(--color-border)]">
                 <h2
                   id="post-detail-title"
                   className="text-[14.5px] text-black dark:text-white font-normal leading-relaxed break-words"
@@ -338,8 +338,8 @@ export default function DashboardPage() {
               </div>
 
               {/* Metadata */}
-              <div className="px-8 py-5 border-b border-[var(--color-border)]">
-                <div className="flex flex-wrap items-center gap-3">
+              <div className="px-4 sm:px-8 py-4 sm:py-5 border-b border-[var(--color-border)]">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <StatusBadge status={selectedPost.status} size="md" />
 
                   <div className="flex items-center gap-3">
@@ -362,7 +362,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Scrollable Content */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
               {/* Image */}
               {selectedPost.imageUrl && (
                 <div className="flex justify-center rounded-xl overflow-hidden border border-[var(--color-border)] bg-black/5 dark:bg-black/20 p-2">

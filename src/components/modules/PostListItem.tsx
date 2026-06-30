@@ -62,25 +62,25 @@ export default function PostListItem({
   return (
     <div
       onClick={() => onView?.(post.id)}
-      className="group relative rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 transition-all duration-300 hover:shadow-lg hover:shadow-[var(--color-shadow)] hover:border-[var(--color-border-hover)] cursor-pointer hover:-translate-y-1"
+      className="group relative rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-6 transition-all duration-300 hover:shadow-lg hover:shadow-[var(--color-shadow)] hover:border-[var(--color-border-hover)] cursor-pointer sm:hover:-translate-y-1"
     >
       {/* Top row: thumbnail + content + chevron */}
-      <div className="flex items-start gap-5">
+      <div className="flex items-start gap-3 sm:gap-5">
         {/* Thumbnail */}
         {post.imageUrl ? (
-          <div className="flex-shrink-0 h-20 w-20 rounded-xl overflow-hidden bg-[var(--color-surface-hover)] ring-1 ring-[var(--color-border)] transition-transform duration-300 group-hover:scale-105">
+          <div className="flex-shrink-0 h-14 w-14 sm:h-20 sm:w-20 rounded-xl overflow-hidden bg-[var(--color-surface-hover)] ring-1 ring-[var(--color-border)] transition-transform duration-300 sm:group-hover:scale-105">
             <img src={post.imageUrl} alt="" className="h-full w-full object-cover" />
           </div>
         ) : (
-          <div className="flex-shrink-0 h-20 w-20 rounded-xl bg-gradient-to-br from-[var(--color-surface-hover)] to-[var(--color-border)] flex items-center justify-center ring-1 ring-[var(--color-border)]">
-            <FileText className="h-8 w-8 text-[var(--color-text-muted)]" />
+          <div className="flex-shrink-0 h-14 w-14 sm:h-20 sm:w-20 rounded-xl bg-gradient-to-br from-[var(--color-surface-hover)] to-[var(--color-border)] flex items-center justify-center ring-1 ring-[var(--color-border)]">
+            <FileText className="h-6 w-6 sm:h-8 sm:w-8 text-[var(--color-text-muted)]" />
           </div>
         )}
 
         {/* Content */}
         <div className="flex-1 min-w-0 py-0.5">
           {/* Title — up to 2 lines */}
-          <h3 className="text-[16px] font-semibold text-[var(--color-text-primary)] leading-snug line-clamp-2 group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors duration-200">
+          <h3 className="text-[15px] sm:text-[16px] font-semibold text-[var(--color-text-primary)] leading-snug line-clamp-2 group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors duration-200">
             {post.title}
           </h3>
 
@@ -90,7 +90,7 @@ export default function PostListItem({
           </p>
 
           {/* Metadata row */}
-          <div className="flex flex-wrap items-center gap-4 mt-4">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-3 sm:mt-4">
             <StatusBadge status={post.status} />
 
             <div className="flex items-center gap-3">
@@ -112,7 +112,7 @@ export default function PostListItem({
         </div>
 
         {/* Chevron indicator */}
-        <div className="flex-shrink-0 flex items-center self-center">
+        <div className="hidden sm:flex flex-shrink-0 items-center self-center">
           <ChevronRight className="h-5 w-5 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-all duration-200 group-hover:translate-x-0.5" />
         </div>
       </div>

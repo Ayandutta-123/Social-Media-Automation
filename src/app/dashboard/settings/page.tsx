@@ -33,9 +33,9 @@ export default function SchedulePage() {
     <div className="min-h-screen">
       <TopBar title="Schedule" />
 
-      <div className="p-8">
-        <div className="mb-8 animate-fade-in">
-          <h2 className="text-[22px] font-bold text-[var(--color-text-primary)] tracking-tight">
+      <div className="p-4 sm:p-6 lg:p-8">
+        <div className="mb-6 sm:mb-8 animate-fade-in">
+          <h2 className="text-[20px] sm:text-[22px] font-bold text-[var(--color-text-primary)] tracking-tight">
             Publishing schedule
           </h2>
           <p className="text-[14px] text-[var(--color-text-muted)] mt-1.5">
@@ -68,7 +68,7 @@ export default function SchedulePage() {
               className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 animate-fade-in"
               style={{ animationDelay: `${0.04 * index}s` }}
             >
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 dark:bg-emerald-900/20">
                     <CalendarDays className="h-5 w-5 text-emerald-500 dark:text-emerald-400" />
@@ -89,7 +89,7 @@ export default function SchedulePage() {
                   </div>
                 </div>
 
-                <div className="flex flex-col items-end gap-2">
+                <div className="flex flex-col items-start sm:items-end gap-2">
                   {entry.times.map((time) => (
                     <span
                       key={time}

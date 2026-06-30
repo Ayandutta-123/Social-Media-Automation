@@ -41,7 +41,7 @@ function getUsername(): string {
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { collapsed, toggle } = useSidebar();
+  const { collapsed, toggle, mobileOpen, closeMobile, isMobile } = useSidebar();
   const { theme, toggleTheme } = useTheme();
   const [username, setUsername] = useState("");
 
@@ -59,10 +59,13 @@ export default function Sidebar() {
       <Link
         key={item.href}
         href={item.href}
-        title={collapsed ? item.label : undefined}
+        title={collapsed && !isMobile ? item.label : undefined}
+        onClick={() => {
+          if (isMobile) closeMobile();
+        }}
         className={`
           group relative flex items-center rounded-xl text-[14px] font-medium transition-all duration-200
-          ${collapsed ? "justify-center px-0 py-3 mx-1" : "gap-3 px-4 py-3"}
+          ${collapsed && !isMobile ? "justify-center px-0 py-3 mx-1" : "gap-3 px-4 py-3"}
           ${isActive
             ? "bg-[var(--color-sidebar-active-bg)] text-[var(--color-sidebar-active-text)]"
             : "text-[var(--color-sidebar-text)] hover:bg-[var(--color-sidebar-hover)] hover:text-[var(--color-sidebar-text-active)]"
@@ -75,24 +78,27 @@ export default function Sidebar() {
             : "text-[var(--color-sidebar-text)] group-hover:text-[var(--color-sidebar-active-icon)]"
             }`}
         />
-        {!collapsed && (
+        {!collapsed || isMobile ? (
           <span className="flex-1 truncate">{item.label}</span>
-        )}
+        ) : null}
       </Link>
     );
   };
 
   return (
     <aside
-      className={`fixed left-0 top-0 bottom-0 z-40 flex flex-col bg-[var(--color-sidebar-bg)] border-r border-[var(--color-sidebar-border)] transition-all duration-300 ease-in-out ${collapsed ? "w-[68px]" : "w-[250px]"
-        }`}
+      className={`fixed left-0 top-0 bottom-0 z-50 flex flex-col bg-[var(--color-sidebar-bg)] border-r border-[var(--color-sidebar-border)] transition-all duration-300 ease-in-out w-[250px]
+        ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
+        md:translate-x-0
+        ${collapsed ? "md:w-[68px]" : "md:w-[250px]"}
+      `}
     >
       {/* Brand — logo sized to match the nav items */}
       <div
-        className={`flex items-center transition-all duration-300 ${collapsed ? "px-3 py-4 justify-center" : "px-4 py-4"
+        className={`flex items-center transition-all duration-300 ${collapsed && !isMobile ? "px-3 py-4 justify-center" : "px-4 py-4"
           }`}
       >
-        {collapsed ? (
+        {collapsed && !isMobile ? (
           <div className="relative flex-shrink-0 flex h-8 w-8 items-center justify-center">
             <Wifi className="h-5 w-5 text-blue-400 drop-shadow-sm" />
           </div>
@@ -111,11 +117,11 @@ export default function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-2 pt-6 pb-2">
         {/* Section Label - Menu */}
-        {!collapsed && (
+        {!collapsed || isMobile ? (
           <p className="px-4 mb-3 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-sidebar-section-label)]">
             Menu
           </p>
-        )}
+        ) : null}
 
         {/* Primary Nav */}
         <div className="space-y-0.5">
@@ -131,7 +137,7 @@ export default function Sidebar() {
       {/* Footer Section */}
       <div className="mt-auto">
         {/* Theme Toggle */}
-        {!collapsed ? (
+        {!collapsed || isMobile ? (
           <div className="px-4 pt-4 pb-2">
             <div className="flex items-center rounded-xl bg-[var(--color-sidebar-toggle-bg)] p-1">
               <button
@@ -173,14 +179,14 @@ export default function Sidebar() {
         )}
 
         {/* User Profile */}
-        <div className={`border-t border-[var(--color-sidebar-border)] ${collapsed ? "px-2 py-3" : "px-4 py-3"}`}>
-          <div className={`flex items-center ${collapsed ? "justify-center" : "gap-3"}`}>
+        <div className={`border-t border-[var(--color-sidebar-border)] ${collapsed && !isMobile ? "px-2 py-3" : "px-4 py-3"}`}>
+          <div className={`flex items-center ${collapsed && !isMobile ? "justify-center" : "gap-3"}`}>
             {/* Avatar */}
             <div className="flex-shrink-0 flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 text-[12px] font-bold text-white shadow-md shadow-violet-500/20">
               {username ? username.charAt(0).toUpperCase() : "H"}
             </div>
 
-            {!collapsed && (
+            {!collapsed || isMobile ? (
               <>
                 {/* User Info */}
                 <div className="flex-1 min-w-0">
@@ -204,7 +210,7 @@ export default function Sidebar() {
                   <LogOut className="h-4 w-4" />
                 </button>
               </>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -212,7 +218,7 @@ export default function Sidebar() {
         <button
           onClick={toggle}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className={`flex w-full items-center justify-center gap-2 border-t border-[var(--color-sidebar-border)] py-2.5 text-[var(--color-sidebar-text)] hover:text-[var(--color-sidebar-text-active)] hover:bg-[var(--color-sidebar-hover)] transition-all duration-200 text-[12px] font-medium`}
+          className={`hidden md:flex w-full items-center justify-center gap-2 border-t border-[var(--color-sidebar-border)] py-2.5 text-[var(--color-sidebar-text)] hover:text-[var(--color-sidebar-text-active)] hover:bg-[var(--color-sidebar-hover)] transition-all duration-200 text-[12px] font-medium`}
         >
           {collapsed ? (
             <ChevronRight className="h-4 w-4" />

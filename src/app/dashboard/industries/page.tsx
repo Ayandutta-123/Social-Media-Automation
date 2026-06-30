@@ -136,7 +136,7 @@ export default function IndustriesPage() {
     <div className="min-h-screen">
       <TopBar title="Industries" />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-6 lg:p-8">
         {/* Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           <StatCard
@@ -169,7 +169,7 @@ export default function IndustriesPage() {
         </div>
 
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
           <h3 className="text-[16px] font-semibold text-[var(--color-text-primary)]">
             Industry rotation
           </h3>
@@ -218,7 +218,7 @@ export default function IndustriesPage() {
                   setDraggedIdx(null);
                 }}
                 onDragEnd={() => setDraggedIdx(null)}
-                className={`flex items-center gap-4 rounded-xl border bg-[var(--color-surface)] p-4 transition-all duration-200 hover:shadow-md animate-fade-in ${draggedIdx === index ? "opacity-40" : ""
+                className={`flex flex-wrap sm:flex-nowrap items-center gap-3 sm:gap-4 rounded-xl border bg-[var(--color-surface)] p-3 sm:p-4 transition-all duration-200 hover:shadow-md animate-fade-in ${draggedIdx === index ? "opacity-40" : ""
                   } ${industry.isActive
                     ? "border-[var(--color-border)] hover:border-[var(--color-border-hover)]"
                     : "border-[var(--color-border)] opacity-60"
@@ -263,7 +263,7 @@ export default function IndustriesPage() {
 
                 {/* Status */}
                 <span
-                  className={`inline-flex items-center gap-1.5 text-[12px] font-medium ${industry.isActive ? "text-emerald-600 dark:text-emerald-400" : "text-[var(--color-text-muted)]"
+                  className={`hidden sm:inline-flex items-center gap-1.5 text-[12px] font-medium ${industry.isActive ? "text-emerald-600 dark:text-emerald-400" : "text-[var(--color-text-muted)]"
                     }`}
                 >
                   <Power className="h-3.5 w-3.5" />
@@ -289,12 +289,12 @@ export default function IndustriesPage() {
 
       {/* Add Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => setShowAddModal(false)}
           />
-          <div className="relative w-full max-w-md rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-2xl animate-fade-in">
+          <div className="relative w-full max-w-md rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 sm:p-6 shadow-2xl animate-fade-in">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-[16px] font-semibold text-[var(--color-text-primary)]">
                 Add industry

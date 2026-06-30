@@ -100,13 +100,13 @@ export default function UploadImagePage() {
     <div className="min-h-screen min-w-0 flex flex-col">
       <TopBar title="Upload image" />
 
-      <div className="flex-1 flex flex-col p-8">
+      <div className="flex-1 flex flex-col p-4 sm:p-6 lg:p-8">
         {/* Main Card — fills available height */}
-        <div className="flex-1 flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-8 shadow-sm animate-fade-in">
+        <div className="flex-1 flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-6 lg:p-8 shadow-sm animate-fade-in">
 
           {/* Title */}
-          <div className="mb-8">
-            <h2 className="text-[24px] font-bold text-[var(--color-text-primary)] tracking-tight">
+          <div className="mb-6 sm:mb-8">
+            <h2 className="text-[20px] sm:text-[24px] font-bold text-[var(--color-text-primary)] tracking-tight">
               Custom Image
             </h2>
             <p className="text-[14px] text-[var(--color-text-muted)] mt-1.5">
@@ -203,7 +203,7 @@ export default function UploadImagePage() {
           )}
 
           {/* Done Button — right-aligned */}
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-4">
             <p className="text-[12px] text-[var(--color-text-muted)] max-w-md">
               Upload only while your n8n workflow is waiting at the image webhook.
               Skipping this step lets the workflow continue with the AI image.
@@ -212,7 +212,7 @@ export default function UploadImagePage() {
               type="button"
               onClick={handleUpload}
               disabled={!selectedFile || isUploading}
-              className="inline-flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-7 py-3 text-[15px] font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none transition-all shadow-sm active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+              className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-7 py-3 text-[15px] font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none transition-all shadow-sm active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {isUploading ? (
                 <span className="h-4 w-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />

@@ -15,6 +15,12 @@ export const metadata: Metadata = {
     "Manage your social media automation workflow with HyperThings. Content calendar, approvals, competitor tracking, and analytics — all in one place.",
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
