@@ -105,7 +105,8 @@ class PublishingService {
           hashtags: caption.hashtags,
           imageUrl: baseContent.imageUrl,
           localImageUrl: baseContent.localImageUrl,
-          imageUrls: platform === 'instagram' ? baseContent.imageUrls : undefined,
+          imageUrls: platform === 'instagram' || platform === 'facebook' ? baseContent.imageUrls : undefined,
+          localImageUrls: platform === 'linkedin' && rawSlides.length >= 2 ? rawSlides : undefined,
           callToAction: caption.callToAction ?? undefined,
         };
         const posted = await this.publishToPlatform(

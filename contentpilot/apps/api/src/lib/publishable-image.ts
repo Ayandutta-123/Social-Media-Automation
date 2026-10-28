@@ -331,7 +331,13 @@ export async function hostImageForSocialPublish(
   if (fitted.adjusted) {
     console.warn(`[publish] ${fitted.from} is outside ${platforms.join('/')} feed shape; fitted to ${fitted.to} without cropping`);
   }
-  const jpeg = fitted.bytes;
+  let jpeg = fitted.bytes;
+  if (platforms.includes('instagram')) {
+    const meta = await sharp(jpeg.buffer, { failOn: 'none' }).metadata();
+    if ((meta.width ?? 0) > 1440) {
+      jpeg = { ...jpeg, buffer: await sharp(jpeg.buffer).resize({ width: 1440 }).jpeg({ quality: 92, mozjpeg: true }).toBuffer() };
+    }
+  }
 
   const own = await hostOnOwnApi(tenantId, jpeg);
   if (own) return own;

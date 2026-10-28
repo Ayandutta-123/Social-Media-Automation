@@ -337,6 +337,8 @@ Generate an improved version that specifically addresses that request.`,
         }
         if (existingCarousel && existingCarousel.slides.length >= 2) {
           const slideCount = clampSlideCount(existingCarousel.slideCount);
+          // Keep the carousel's original canvas so every slide (and the post) stays one shape.
+          const carouselFormat = existingCarousel.format || formatForPlatforms(asStringArray(content.targetPlatforms));
           const brand = await prisma.brandSettings.findUnique({ where: { tenantId: content.tenantId } });
           const { preferOriginalLogoUrl } = await import('../lib/store-upload');
           const slides = [];
@@ -367,7 +369,7 @@ Generate an improved version that specifically addresses that request.`,
                 'hero_right',
               slideLabel: slideSpec ? `${i + 1} / ${slideCount}` : null,
               negativePrompt: slideSpec?.artNegativePrompt ?? null,
-              format: formatForPlatforms(asStringArray(content.targetPlatforms)),
+              format: carouselFormat,
               headerText: headline,
               footerCta:
                 i === slideCount - 1 ? post.callToAction || null : `Slide ${i + 1} / ${slideCount}`,
@@ -402,7 +404,12 @@ Generate an improved version that specifically addresses that request.`,
                 ...slots,
                 format: 'carousel',
                 ...(posterSpec ? { posterSpec: posterSpec as unknown as Record<string, unknown> } : {}),
-                carousel: { slideCount: slides.length, slides, format: formatForPlatforms(asStringArray(content.targetPlatforms)) },
+                carousel: {
+                  ...((prevSlotsRaw.carousel && typeof prevSlotsRaw.carousel === 'object' ? prevSlotsRaw.carousel : {}) as object),
+                  slideCount: slides.length,
+                  slides,
+                  format: carouselFormat,
+                },
               } as object,
             },
           });

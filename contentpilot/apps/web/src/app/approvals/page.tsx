@@ -177,7 +177,7 @@ export default function ApprovalsPage() {
                       <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]">
                         {item.imageUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={item.imageUrl} alt="" className="h-full w-full object-cover" />
+                          <img src={item.imageUrl} alt="" className="h-full w-full object-contain" />
                         ) : (
                           <div className="flex h-full items-center justify-center text-[hsl(var(--muted-foreground))]">
                             {item.status === 'generating' ? (

@@ -6,8 +6,10 @@ export interface PublishContent {
   imageUrl?: string;
   /** Local /uploads or data path for binary upload (LinkedIn) */
   localImageUrl?: string;
-  /** Multi-image carousel (Instagram). Cover is still imageUrl. */
+  /** Multi-image carousel as public HTTPS URLs (Instagram, Facebook). Cover is still imageUrl. */
   imageUrls?: string[];
+  /** Same slides as stored paths / URLs for binary upload (LinkedIn). */
+  localImageUrls?: string[];
   callToAction?: string;
 }
 

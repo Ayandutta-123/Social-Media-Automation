@@ -8,6 +8,16 @@ import { approvalService } from '../services/approval.service';
 import { getRotationStatus } from '../services/rotation.service';
 import { executionLogService } from '../services/execution-log.service';
 import { asStringArray } from '../lib/json';
+import { extractCarouselPayload as extractCarouselForFormat } from '../lib/carousel-parse';
+import { formatForPlatforms, type SocialImageFormat } from '../providers/images/social-frame';
+
+/** Size a post should use when the caller does not pick one: its carousel's canvas, else the native size for its channels. */
+function defaultPostFormat(content: { templateSlots: unknown; targetPlatforms: unknown }): SocialImageFormat {
+  return (
+    extractCarouselForFormat(content.templateSlots)?.format ||
+    formatForPlatforms(asStringArray(content.targetPlatforms))
+  );
+}
 
 export async function contentRoutes(app: FastifyInstance) {
   app.post('/trends/discover', { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) }, async (request, reply) => {
@@ -1943,7 +1953,7 @@ export async function contentRoutes(app: FastifyInstance) {
         visualStyleId: body.visualStyleId || (slots.visualStyleId as string) || 'professional_photo',
         brandImageStyle: brand?.imageStyle,
         logoPlacement: body.logoPlacement,
-        format: body.format || 'instagram_square',
+        format: body.format || defaultPostFormat(content),
         playId: 'announcement',
       });
       const updated = await prisma.generatedContent.findUniqueOrThrow({ where: { id } });
@@ -1985,7 +1995,7 @@ export async function contentRoutes(app: FastifyInstance) {
     }
 
     const frameOpts = {
-      format: (body.format || (insightReport ? 'instagram_portrait' : 'instagram_square')) as
+      format: (body.format || (insightReport ? 'instagram_portrait' : defaultPostFormat(content))) as
         | 'instagram_square'
         | 'instagram_portrait'
         | 'linkedin'
@@ -2167,7 +2177,13 @@ export async function contentRoutes(app: FastifyInstance) {
                 ...(posterSpec
                   ? { posterSpec: posterSpec as unknown as Record<string, unknown> }
                   : {}),
-                carousel: { slideCount: slides.length, slides },
+                // Keep contacts / layouts saved at generation; only slides (and canvas) change.
+                carousel: {
+                  ...(((content.templateSlots as Record<string, unknown> | null)?.carousel ?? {}) as object),
+                  slideCount: slides.length,
+                  slides,
+                  format: frameOpts.format,
+                },
               } as object,
               revisionCount: { increment: 1 },
             },
@@ -2246,7 +2262,7 @@ export async function contentRoutes(app: FastifyInstance) {
     try {
       const { reframeExistingImage } = await import('../services/image-attach.service');
       await reframeExistingImage(request.session.tenantId!, id, {
-        format: body.format || 'instagram_square',
+        format: body.format || defaultPostFormat(content),
         logoPlacement: body.logoPlacement || 'top-left',
         headerText: overlaysEnabled ? body.headerText ?? null : null,
         footerCta: overlaysEnabled ? body.footerCta ?? null : null,

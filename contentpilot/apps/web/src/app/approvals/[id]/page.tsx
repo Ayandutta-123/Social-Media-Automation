@@ -1040,7 +1040,7 @@ export default function ApprovalDetailPage() {
                   key={activeImageUrl}
                   src={activeImageUrl}
                   alt={activeSlideHeadline || 'Post visual'}
-                  className="aspect-square w-full cursor-zoom-in object-cover"
+                  className="mx-auto block h-auto max-h-[78vh] w-full cursor-zoom-in object-contain"
                   onClick={() => setFullscreen(true)}
                 />
                 {carouselSlides.length > 1 ? (

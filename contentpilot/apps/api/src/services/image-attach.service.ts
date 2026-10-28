@@ -968,6 +968,8 @@ export async function reframeExistingImage(
 
   const { extractCarouselPayload } = await import('../lib/carousel-parse');
   const carousel = extractCarouselPayload(content.templateSlots);
+  // Slides keep the canvas the carousel was made at unless the caller asks for another.
+  const frameFormat: SocialImageFormat = opts.format || carousel?.format || format;
   const kitVisuals = await resolveBrandKitVisuals(tenantId, contentId, brand.imageStyle);
   if (carousel && carousel.slides.length >= 2 && !isInsight) {
     const reframed = [];
@@ -1013,8 +1015,8 @@ export async function reframeExistingImage(
           slideLabel: `${i + 1} / ${carousel.slides.length}`,
           contactChips: isLast ? storedContacts : null,
           logoPlacement,
-          width: SOCIAL_IMAGE_FORMATS[format].width,
-          height: SOCIAL_IMAGE_FORMATS[format].height,
+          width: SOCIAL_IMAGE_FORMATS[frameFormat].width,
+          height: SOCIAL_IMAGE_FORMATS[frameFormat].height,
         });
         reframed.push({ ...slide, imageUrl: poster.publicUrl, rawImageUrl: raw });
         continue;
@@ -1024,7 +1026,7 @@ export async function reframeExistingImage(
         imageUrl: raw,
         companyName: brand.companyName,
         logoUrl: brand.logoUrl,
-        format,
+        format: frameFormat,
         logoPlacement,
         headerText:
           i === 0 && opts.headerText != null ? opts.headerText : slide.headline,
@@ -1051,7 +1053,13 @@ export async function reframeExistingImage(
           format: 'carousel',
           logoPlacement,
           overlaysEnabled: overlaysOn,
-          carousel: { slideCount: reframed.length, slides: reframed },
+          // Keep contacts / layouts saved at generation time; only slides (and canvas) change.
+          carousel: {
+            ...(slots.carousel && typeof slots.carousel === 'object' ? (slots.carousel as object) : {}),
+            slideCount: reframed.length,
+            slides: reframed,
+            format: frameFormat,
+          },
         } as object,
       },
     });

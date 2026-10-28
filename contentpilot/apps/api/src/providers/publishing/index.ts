@@ -181,6 +181,9 @@ export class InstagramPublisher implements PlatformPublisher {
   }
 }
 
+const LINKEDIN_MAX_IMAGES = 9;
+const FACEBOOK_MAX_IMAGES = 10;
+
 export class LinkedInPublisher implements PlatformPublisher {
   readonly platform = 'linkedin';
 
@@ -193,18 +196,24 @@ export class LinkedInPublisher implements PlatformPublisher {
     const authorUrn = accountId.startsWith('urn:') ? accountId : `urn:li:person:${accountId}`;
 
     let media: Array<Record<string, unknown>> | undefined;
-    const sourceImage = content.localImageUrl || content.imageUrl;
-    if (sourceImage) {
+    // A carousel posts every slide as one multi-image post (LinkedIn allows up to 9 images).
+    const slides = (content.localImageUrls?.length ? content.localImageUrls : [])
+      .map((u) => u.trim())
+      .filter(Boolean)
+      .slice(0, LINKEDIN_MAX_IMAGES);
+    const sources = slides.length >= 2 ? slides : [content.localImageUrl || content.imageUrl || ''].filter(Boolean);
+    if (sources.length) {
       try {
-        const asset = await this.uploadImageAsset(sourceImage, accessToken, authorUrn);
-        media = [
-          {
+        media = [];
+        for (let i = 0; i < sources.length; i++) {
+          const asset = await this.uploadImageAsset(sources[i]!, accessToken, authorUrn);
+          media.push({
             status: 'READY',
-            description: { text: content.headline.slice(0, 200) },
+            description: { text: (sources.length > 1 ? `${content.headline} (${i + 1}/${sources.length})` : content.headline).slice(0, 200) },
             media: asset,
             title: { text: content.headline.slice(0, 200) },
-          },
-        ];
+          });
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return { success: false, error: `LinkedIn image upload failed: ${msg}` };
@@ -360,6 +369,40 @@ export class FacebookPublisher implements PlatformPublisher {
     accountId: string,
   ): Promise<PublishResult> {
     const message = this.formatPost(content);
+
+    // Carousel: upload each slide unpublished, then attach them all to one feed post.
+    const slides = (content.imageUrls || []).map((u) => u.trim()).filter(Boolean).slice(0, FACEBOOK_MAX_IMAGES);
+    if (slides.length >= 2) {
+      const mediaIds: string[] = [];
+      for (let i = 0; i < slides.length; i++) {
+        const up = await fetch(`${this.baseUrl}/${accountId}/photos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: slides[i], published: false, access_token: accessToken }),
+        });
+        if (!up.ok) {
+          return { success: false, error: `Facebook photo ${i + 1}/${slides.length} upload failed: ${await up.text()}` };
+        }
+        const photo = (await up.json()) as { id?: string };
+        if (!photo.id) return { success: false, error: `Facebook photo ${i + 1} returned no id` };
+        mediaIds.push(photo.id);
+      }
+      const post = await fetch(`${this.baseUrl}/${accountId}/feed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message,
+          attached_media: mediaIds.map((id) => ({ media_fbid: id })),
+          access_token: accessToken,
+        }),
+      });
+      if (!post.ok) {
+        return { success: false, error: `Facebook multi-photo post failed: ${await post.text()}` };
+      }
+      const data = (await post.json()) as { id: string };
+      return { success: true, platformPostId: data.id };
+    }
+
     const endpoint = content.imageUrl
       ? `${this.baseUrl}/${accountId}/photos`
       : `${this.baseUrl}/${accountId}/feed`;
