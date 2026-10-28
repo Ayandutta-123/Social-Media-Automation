@@ -1671,7 +1671,8 @@ function AiAssistantInner() {
             </div>
           )}
 
-          <div className="mb-2 flex flex-wrap items-center gap-2">
+          <div className="sticky bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-20 -mx-3 mt-2 border-t border-[hsl(var(--border))] bg-[hsl(var(--card))]/95 px-3 pb-3 pt-2.5 shadow-[0_-8px_24px_rgb(15_23_42/0.08)] backdrop-blur-md sm:-mx-4 sm:px-4 md:static md:mx-0 md:mt-0 md:border-0 md:bg-transparent md:p-0 md:shadow-none">
+          <div className="mb-2 flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] sm:flex-wrap sm:gap-2 sm:overflow-visible [&::-webkit-scrollbar]:hidden">
             {([
               ['auto', <Sparkles key="auto" size={13} />, 'Auto'],
               ['text', <FileText key="text" size={13} />, 'Text only'],
@@ -1680,16 +1681,16 @@ function AiAssistantInner() {
               <button
                 key={id}
                 type="button"
-                className="chip inline-flex items-center gap-1.5"
+                className="chip inline-flex shrink-0 items-center gap-1 !px-2.5 sm:gap-1.5 sm:!px-3.5"
                 data-active={outputMode === id}
                 onClick={() => setOutputMode(id)}
               >
                 {icon} {label}
               </button>
             ))}
-            <label className={`chip ml-auto hidden cursor-pointer items-center gap-1.5 md:inline-flex ${uploadingRef ? 'pointer-events-none opacity-60' : ''}`}>
+            <label aria-label={referenceUrl ? 'Replace image' : 'Attach image'} className={`chip ml-auto inline-flex shrink-0 cursor-pointer items-center gap-1 !px-2.5 sm:gap-1.5 sm:!px-3.5 ${uploadingRef ? 'pointer-events-none opacity-60' : ''}`}>
               <ImagePlus size={13} />
-              {referenceUrl ? 'Replace image' : 'Attach image'}
+              {referenceUrl ? 'Replace' : 'Attach'}<span className="hidden sm:inline">&nbsp;image</span>
               <input
                 type="file"
                 accept="image/*"
@@ -1724,31 +1725,7 @@ function AiAssistantInner() {
             </div>
           )}
 
-          <div className="sticky bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] z-20 -mx-3 mt-2 flex gap-2 border-t border-[hsl(var(--border))] bg-[hsl(var(--card))]/95 px-3 py-3 shadow-[0_-8px_24px_rgb(15_23_42/0.08)] backdrop-blur-md sm:-mx-4 sm:px-4 md:static md:mx-0 md:mt-0 md:border-0 md:bg-transparent md:p-0 md:shadow-none">
-            {/* Mobile: attach lives in the composer bar so it is never hidden by the sticky bar / bottom nav. */}
-            <label
-              className={`relative flex h-[44px] w-[44px] shrink-0 cursor-pointer items-center justify-center self-end rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] md:hidden ${
-                uploadingRef || busy ? 'pointer-events-none opacity-60' : 'active:scale-95'
-              }`}
-              title={referenceUrl ? 'Replace image' : 'Attach image'}
-            >
-              <ImagePlus size={18} />
-              {referenceUrl && (
-                <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-brand-600 ring-2 ring-[hsl(var(--card))]" />
-              )}
-              <span className="sr-only">{referenceUrl ? 'Replace image' : 'Attach image'}</span>
-              <input
-                type="file"
-                accept="image/*"
-                className="sr-only"
-                disabled={uploadingRef || busy}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void uploadReference(file);
-                  e.target.value = '';
-                }}
-              />
-            </label>
+          <div className="flex gap-2">
             <textarea
               className="input min-h-[52px] flex-1 resize-y"
               rows={2}
@@ -1795,6 +1772,7 @@ function AiAssistantInner() {
                 <span className="sr-only">Send</span>
               </ProcessingButton>
             )}
+          </div>
           </div>
         </section>
       </div>
