@@ -10,7 +10,7 @@ import {
   Trash2, RotateCcw, Plus, Check, Building2, KeyRound,
   Image as ImageIcon, Globe2, Radar, Bell, Upload, Share2, CheckCircle2, LayoutTemplate,
   Workflow, ChevronLeft, ChevronRight, Clock, Mail, Palette, Lock, FileSpreadsheet, Sparkles,
-  ExternalLink,
+  ExternalLink, Radar as RadarIcon, Smile, TrendingUp, CalendarDays, Play, ShieldCheck, Zap, PauseCircle,
 } from 'lucide-react';
 import { InlineNotice, ProcessingButton, Spinner, Toggle, WorkflowStepper } from '@/components/ui';
 import { PlatformBadge, PlatformBadgeList } from '@/components/platform-badge';
@@ -3623,6 +3623,14 @@ const JOB_LABELS: Record<AutomationRow['jobType'], string> = {
   calendar: 'Content calendar',
 };
 
+const JOB_ICONS: Record<AutomationRow['jobType'], typeof Workflow> = {
+  newsletter: Mail,
+  competitor: RadarIcon,
+  trends: TrendingUp,
+  meme: Smile,
+  calendar: CalendarDays,
+};
+
 const CALENDAR_MODE_LABELS: Record<NonNullable<AutomationRow['calendarMode']>, string> = {
   saved_plan: 'My content calendar',
   ai_plan: 'My content calendar',
@@ -4124,19 +4132,84 @@ function AutomationSettings() {
     }
   };
 
+  type Stage = {
+    label: string;
+    title: string;
+    detail?: string;
+    platforms?: string[];
+    tone?: 'review' | 'auto';
+    toneLabel?: string;
+  };
+
+  const automationStages = (item: AutomationRow): Stage[] => {
+    let contentDetail: string | undefined;
+    if (item.jobType === 'calendar') {
+      const mode = CALENDAR_MODE_LABELS[item.calendarMode || 'festival'];
+      if (item.calendarMode === 'festival' || !item.calendarMode) {
+        const regions = (item.calendarFilters?.regions || [])
+          .map((r) => FESTIVAL_REGION_OPTIONS.find((o) => o.id === r)?.label || r)
+          .join(', ');
+        const cats = (item.calendarFilters?.categories || [])
+          .map((c) => FESTIVAL_CATEGORY_OPTIONS.find((o) => o.id === c)?.label || c)
+          .join(', ');
+        contentDetail = [mode, regions || 'All markets', cats || 'All types'].join(' · ');
+      } else {
+        const planName =
+          item.contentCalendarPlanName ||
+          savedCalendarPlans.find((p) => p.id === item.contentCalendarPlanId)?.name ||
+          item.contentCalendarPlanId?.slice(0, 8);
+        contentDetail = planName ? `${mode} · ${planName}` : mode;
+      }
+    }
+    const ids = (item.brandTemplateIds || []).filter((id) => id !== '__ai__');
+    const withAi = item.rotateIncludeAi || (item.brandTemplateIds || []).includes('__ai__');
+    const visual =
+      item.templateMode === 'none'
+        ? { title: 'AI-generated image', detail: 'No brand template' }
+        : item.templateMode === 'random'
+          ? { title: 'Random brand template', detail: undefined }
+          : item.templateMode === 'rotate'
+            ? {
+                title: `Rotating templates (${ids.length})`,
+                detail: withAi ? 'Includes AI-generated images' : undefined,
+              }
+            : { title: item.brandTemplate?.name || 'Brand template', detail: 'Fixed template' };
+    return [
+      {
+        label: 'Trigger',
+        title: item.scheduleType === 'weekly' ? 'Recurring weekly' : 'One-time run',
+        detail: item.timezone || 'UTC',
+      },
+      { label: 'Content', title: JOB_LABELS[item.jobType] || item.jobType, detail: contentDetail },
+      { label: 'Visual', ...visual },
+      {
+        label: 'Delivery',
+        title: item.channels.length ? 'Publish to' : 'No channels selected',
+        platforms: item.channels,
+        tone: item.requireApproval ? 'review' : 'auto',
+        toneLabel: item.requireApproval ? 'Needs approval' : 'Auto-publish',
+      },
+    ];
+  };
+
   const uniquePlatforms = Array.from(new Set(platforms.map((p) => p.platform)));
 
   return (
     <div className="space-y-4">
-      <SectionCard
-        icon={Workflow}
-        title="Automation workflows"
-        description="Schedule newsletter, competitor, trends, meme, or content calendar runs. Brand templates and publish channels are chosen here; competitor lists and topics stay in Settings; docs live on the Newsletter page; calendar ideas live on Content Calendar."
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs text-[hsl(var(--muted-foreground))]">
-            Runs every minute when due · default timezone {timezone}
-          </p>
+      <section className="settings-card space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-4 pl-1">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="settings-card-icon mt-0.5">
+              <Workflow size={18} strokeWidth={2.25} />
+            </div>
+            <div className="min-w-0">
+              <h3 className="font-semibold text-[15px] leading-tight tracking-tight">Automation workflows</h3>
+              <p className="mt-1 max-w-2xl text-xs leading-relaxed text-[hsl(var(--muted-foreground))]">
+                Each automation is a pipeline: a schedule triggers a content source, a visual is applied, and the
+                result is sent for approval or published to your channels.
+              </p>
+            </div>
+          </div>
           <ProcessingButton
             type="button"
             variant="sector"
@@ -4147,7 +4220,36 @@ function AutomationSettings() {
             New automation
           </ProcessingButton>
         </div>
-      </SectionCard>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[
+            { label: 'Total', value: String(items.length) },
+            { label: 'Active', value: String(items.filter((i) => i.enabled).length) },
+            { label: 'Paused', value: String(items.filter((i) => !i.enabled).length) },
+            {
+              label: 'Next run',
+              value: (() => {
+                const next = items
+                  .filter((i) => i.enabled && i.nextRunAt)
+                  .sort((x, y) => new Date(x.nextRunAt!).getTime() - new Date(y.nextRunAt!).getTime())[0];
+                return next ? formatInTimeZone(next.nextRunAt!, next.timezone) : '—';
+              })(),
+            },
+          ].map((stat) => (
+            <div
+              key={stat.label}
+              className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 px-3.5 py-2.5"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
+                {stat.label}
+              </p>
+              <p className="mt-0.5 truncate text-sm font-semibold tabular-nums">{stat.value}</p>
+            </div>
+          ))}
+        </div>
+        <p className="pl-1 text-[11px] text-[hsl(var(--muted-foreground))]">
+          Scheduler checks every minute · default timezone {timezone}
+        </p>
+      </section>
 
       {wizardOpen && (
         <section className="settings-card space-y-5">
@@ -4840,8 +4942,15 @@ function AutomationSettings() {
         </section>
       )}
 
-      <div className="space-y-2">
-        <p className="text-sm font-medium px-1">Saved automations</p>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between px-1">
+          <p className="text-sm font-semibold">Saved automations</p>
+          {items.length > 0 && (
+            <span className="text-xs text-[hsl(var(--muted-foreground))]">
+              {items.length} workflow{items.length === 1 ? '' : 's'}
+            </span>
+          )}
+        </div>
         {loading ? (
           <div className="flex justify-center py-10">
             <Spinner size={22} />
@@ -4849,124 +4958,137 @@ function AutomationSettings() {
         ) : items.length === 0 ? (
           <EmptyList message="No automations yet — create one with the wizard above." />
         ) : (
-          <div className="space-y-3">
-            {items.map((item) => (
-              <div key={item.id} className="card !p-4 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-medium truncate">
-                      {item.name || JOB_LABELS[item.jobType] || item.jobType}
-                    </p>
-                    <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))] flex items-center gap-1.5">
-                      <Clock size={12} /> {item.scheduleSummary}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <ProcessingButton
-                      type="button"
-                      variant="sector-outline"
-                      className="!min-h-[44px] md:!min-h-[36px] !px-3 text-xs"
-                      loading={runningId === item.id}
-                      loadingText="Running…"
-                      disabled={runningId != null}
-                      onClick={() => void runNow(item.id)}
-                    >
-                      Run now
-                    </ProcessingButton>
-                    <button
-                      type="button"
-                      className="btn-ghost min-h-[44px] md:!min-h-[36px] !px-2 text-slate-700 dark:text-slate-200"
-                      aria-label="Delete automation"
-                      onClick={() => void remove(item.id)}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-1.5 text-[11px]">
-                  <span className="chip min-h-[44px] md:!min-h-[28px] !px-2.5 !text-[11px]">
-                    {JOB_LABELS[item.jobType] || item.jobType}
-                  </span>
-                  {item.jobType === 'calendar' && (
-                    <span className="chip min-h-[44px] md:!min-h-[28px] !px-2.5 !text-[11px]">
-                      {CALENDAR_MODE_LABELS[item.calendarMode || 'festival']}
-                      {item.calendarMode === 'festival' &&
-                      (item.calendarFilters?.regions?.length ||
-                        item.calendarFilters?.categories?.length)
-                        ? ` · ${(item.calendarFilters?.regions || [])
-                            .map(
-                              (r) =>
-                                FESTIVAL_REGION_OPTIONS.find((o) => o.id === r)?.label || r,
-                            )
-                            .join('/') || 'all'} / ${(item.calendarFilters?.categories || [])
-                            .map(
-                              (c) =>
-                                FESTIVAL_CATEGORY_OPTIONS.find((o) => o.id === c)?.label || c,
-                            )
-                            .join('/') || 'all'}`
-                        : ''}
-                      {(item.calendarMode === 'saved_plan' ||
-                        item.calendarMode === 'ai_plan' ||
-                        item.calendarMode === 'uploaded_plan') &&
-                      (item.contentCalendarPlanName || item.contentCalendarPlanId)
-                        ? ` · ${
-                            item.contentCalendarPlanName ||
-                            savedCalendarPlans.find((p) => p.id === item.contentCalendarPlanId)
-                              ?.name ||
-                            item.contentCalendarPlanId!.slice(0, 8)
-                          }`
-                        : ''}
+          <div className="space-y-4">
+            {items.map((item) => {
+              const JobIcon = JOB_ICONS[item.jobType] || Workflow;
+              const stages = automationStages(item);
+              return (
+                <article
+                  key={item.id}
+                  className={`overflow-hidden rounded-2xl border bg-[hsl(var(--card))] shadow-sm transition-opacity ${
+                    item.enabled ? 'border-[hsl(var(--border))]' : 'border-dashed border-[hsl(var(--border))] opacity-75'
+                  }`}
+                >
+                  <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[hsl(var(--border))] px-4 py-3.5 sm:px-5">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[hsl(var(--primary))]/10 text-[hsl(var(--primary))]">
+                        <JobIcon size={18} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="truncate text-[15px] font-semibold leading-tight">
+                            {item.name || JOB_LABELS[item.jobType] || item.jobType}
+                          </h4>
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                              item.enabled
+                                ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                                : 'bg-slate-500/10 text-slate-600 dark:text-slate-300'
+                            }`}
+                          >
+                            <span className={`h-1.5 w-1.5 rounded-full ${item.enabled ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                            {item.enabled ? 'Active' : 'Paused'}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 flex items-center gap-1.5 text-xs text-[hsl(var(--muted-foreground))]">
+                          <Clock size={12} /> {item.scheduleSummary}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={item.enabled}
+                        aria-label={item.enabled ? 'Pause automation' : 'Enable automation'}
+                        title={item.enabled ? 'Pause automation' : 'Enable automation'}
+                        data-checked={item.enabled}
+                        className="switch"
+                        onClick={() => void setEnabled(item.id, !item.enabled)}
+                      >
+                        <span className="switch-thumb" />
+                      </button>
+                      <ProcessingButton
+                        type="button"
+                        variant="sector-outline"
+                        className="!min-h-[44px] md:!min-h-[36px] !px-3 text-xs gap-1.5"
+                        loading={runningId === item.id}
+                        loadingText="Running…"
+                        disabled={runningId != null}
+                        icon={<Play size={13} />}
+                        onClick={() => void runNow(item.id)}
+                      >
+                        Run now
+                      </ProcessingButton>
+                      <button
+                        type="button"
+                        className="btn-ghost min-h-[44px] md:!min-h-[36px] !px-2 text-slate-500 hover:text-red-600"
+                        aria-label="Delete automation"
+                        title="Delete automation"
+                        onClick={() => {
+                          if (window.confirm(`Delete "${item.name || JOB_LABELS[item.jobType]}"? This cannot be undone.`)) {
+                            void remove(item.id);
+                          }
+                        }}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </header>
+
+                  <ol className="grid gap-px bg-[hsl(var(--border))] sm:grid-cols-2 xl:grid-cols-4">
+                    {stages.map((stage, idx) => (
+                      <li key={stage.label} className="relative flex min-w-0 flex-col gap-1.5 bg-[hsl(var(--card))] px-4 py-3.5 sm:px-5">
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[hsl(var(--primary))]/10 text-[10px] font-bold text-[hsl(var(--primary))]">
+                            {idx + 1}
+                          </span>
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
+                            {stage.label}
+                          </span>
+                        </div>
+                        <p className="text-sm font-semibold leading-snug">{stage.title}</p>
+                        {stage.detail && (
+                          <p className="text-xs leading-relaxed text-[hsl(var(--muted-foreground))]">{stage.detail}</p>
+                        )}
+                        {stage.platforms && stage.platforms.length > 0 && (
+                          <PlatformBadgeList platforms={stage.platforms} size="sm" />
+                        )}
+                        {stage.tone && (
+                          <span
+                            className={`mt-auto inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                              stage.tone === 'review'
+                                ? 'bg-sky-500/10 text-sky-700 dark:text-sky-300'
+                                : 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                            }`}
+                          >
+                            {stage.tone === 'review' ? <ShieldCheck size={12} /> : <Zap size={12} />}
+                            {stage.toneLabel}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+
+                  <footer className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 border-t border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 px-4 py-2.5 text-xs text-[hsl(var(--muted-foreground))] sm:px-5">
+                    {item.enabled ? (
+                      <span>
+                        <span className="font-medium text-[hsl(var(--foreground))]">Next run</span>{' '}
+                        {item.nextRunAt ? formatInTimeZone(item.nextRunAt, item.timezone) : 'Not scheduled'}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5">
+                        <PauseCircle size={13} /> Paused — will not run until enabled
+                      </span>
+                    )}
+                    <span>
+                      <span className="font-medium text-[hsl(var(--foreground))]">Last run</span>{' '}
+                      {item.lastRunAt ? formatInTimeZone(item.lastRunAt, item.timezone) : 'Never'}
                     </span>
-                  )}
-                  <span className="chip min-h-[44px] md:!min-h-[28px] !px-2.5 !text-[11px]">
-                    Template:{' '}
-                    {item.templateMode === 'none'
-                      ? 'None (AI image)'
-                      : item.templateMode === 'random'
-                        ? 'Random'
-                        : item.templateMode === 'rotate'
-                          ? `Rotate · ${Math.max(
-                              0,
-                              (item.brandTemplateIds || []).filter((id) => id !== '__ai__').length,
-                            )} tpl${
-                              item.rotateIncludeAi || (item.brandTemplateIds || []).includes('__ai__')
-                                ? ' + AI'
-                                : ''
-                            }`
-                          : item.brandTemplate?.name || 'Existing'}
-                  </span>
-                  {item.channels.length ? (
-                    <span className="inline-flex min-h-[44px] items-center md:!min-h-[28px]">
-                      <PlatformBadgeList platforms={item.channels} size="sm" />
-                    </span>
-                  ) : (
-                    <span className="chip min-h-[44px] md:!min-h-[28px] !px-2.5 !text-[11px]">
-                      No channels
-                    </span>
-                  )}
-                  <span className="chip min-h-[44px] md:!min-h-[28px] !px-2.5 !text-[11px]">
-                    {item.requireApproval ? 'Needs approval' : 'Auto-publish'}
-                  </span>
-                  <span className="chip min-h-[44px] md:!min-h-[28px] !px-2.5 !text-[11px]">
-                    {item.timezone || 'UTC'}
-                  </span>
-                </div>
-                {item.nextRunAt && (
-                  <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
-                    Next run · {formatInTimeZone(item.nextRunAt, item.timezone)}
-                    {item.lastRunAt
-                      ? ` · Last · ${formatInTimeZone(item.lastRunAt, item.timezone)}`
-                      : ''}
-                  </p>
-                )}
-                <Toggle
-                  label={item.enabled ? 'Enabled' : 'Disabled'}
-                  description={item.enabled ? 'Will run when due' : 'Paused'}
-                  checked={item.enabled}
-                  onCheckedChange={(checked) => void setEnabled(item.id, checked)}
-                />
-              </div>
-            ))}
+                  </footer>
+                </article>
+              );
+            })}
           </div>
         )}
       </div>
