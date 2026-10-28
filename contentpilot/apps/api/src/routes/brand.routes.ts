@@ -31,7 +31,11 @@ import {
   resolvedTemplatesForPlay,
   softDeleteUploadedTemplate,
 } from '../services/play-poster-templates.service';
-import { brandKitFromSettings } from '../lib/brand-kit';
+import { brandKitFromSettings, resolveBrandKitPalette } from '../lib/brand-kit';
+import { getPosterTemplate } from '../services/poster-template-catalog';
+import { isDesignLayout } from '../providers/images/poster-designs';
+import { renderTemplatePreviewSvg } from '../providers/images/design-preview';
+import { OVERLAY_FONTS, parseBrandPalette } from '../providers/images/social-frame';
 import { resolveProviders } from '../services/providers.service';
 import {
   imageDimensions,
@@ -642,16 +646,70 @@ export async function brandRoutes(app: FastifyInstance) {
     const kit = brandKitFromSettings(settings);
     const tenantId = request.session.tenantId!;
 
+    // Drawn templates get a live preview rendered with this tenant's Brand Kit.
+    const withPreview = <T extends { id: string; layout: string; origin?: string }>(t: T): T =>
+      t.origin !== 'upload' && isDesignLayout(t.layout)
+        ? { ...t, previewUrl: `/api/brand/poster-templates/preview/${t.id}.svg` }
+        : t;
+
     return {
       success: true,
       data: {
-        templates: playId
+        templates: (playId
           ? await resolvedTemplatesForPlay(tenantId, playId)
-          : await resolvedAllTemplates(tenantId),
-        byPlay: await resolvedTemplatesByPlay(tenantId),
+          : await resolvedAllTemplates(tenantId)
+        ).map(withPreview),
+        byPlay: (await resolvedTemplatesByPlay(tenantId)).map((g) => ({
+          ...g,
+          templates: g.templates.map(withPreview),
+        })),
         brandKit: kit,
       },
     };
+  });
+
+  /**
+   * Live preview of a drawn template: sample copy + placeholder scene in the tenant's palette,
+   * fonts and logo. Real posts use the AI / uploaded photo in the same layout.
+   */
+  app.get('/poster-templates/preview/:file', { preHandler: requireAuth }, async (request, reply) => {
+    const { file } = z.object({ file: z.string().max(96) }).parse(request.params);
+    const id = file.replace(/\.svg$/i, '');
+    const template = getPosterTemplate(id);
+    if (!template || !isDesignLayout(template.layout)) {
+      return reply.status(404).send({ success: false, error: 'Template preview not found' });
+    }
+    const tenantId = request.session.tenantId!;
+    const settings = await prisma.brandSettings.findUnique({ where: { tenantId } });
+    const kit = brandKitFromSettings(settings);
+    const resolved = resolveBrandKitPalette({ ...kit, mode: 'strict' }, { seed: 'preview', fallbackStyleText: settings?.imageStyle });
+    const palette = resolved
+      ? { ground: resolved.ground, ink: resolved.ink, muted: resolved.muted, accent: resolved.accent, panel: resolved.panel, onAccent: resolved.onAccent }
+      : parseBrandPalette(settings?.imageStyle);
+
+    let logoHref = '';
+    if (settings?.logoUrl) {
+      try {
+        const { prepareLogoForOverlay } = await import('../providers/images/logo-prepare');
+        logoHref = (await prepareLogoForOverlay(settings.logoUrl, tenantId)) || '';
+      } catch {
+        logoHref = '';
+      }
+    }
+
+    const svg = renderTemplatePreviewSvg({
+      templateId: id,
+      sample: template.sample || {},
+      palette,
+      headingFont: OVERLAY_FONTS[kit.fonts.heading].css,
+      bodyFont: OVERLAY_FONTS[kit.fonts.body].css,
+      companyName: settings?.companyName,
+      logoHref,
+    });
+    return reply
+      .header('Content-Type', 'image/svg+xml; charset=utf-8')
+      .header('Cache-Control', 'private, max-age=300')
+      .send(svg);
   });
 
   /** Resolve a typed category/play id before the installer unlocks upload. */

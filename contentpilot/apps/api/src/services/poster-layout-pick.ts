@@ -97,6 +97,8 @@ export function layoutArtDirection(layout: PosterLayoutId): string {
 
 /** Photo-only composition hint for fal / image models. */
 export function layoutPhotoComposition(layout: PosterLayoutId): string {
+  // Drawn templates carry their own art direction (template.artDirection) in the prompt.
+  if (layout.startsWith('design_')) return '';
   return LAYOUT_PHOTO_COMPOSITION[layout] || LAYOUT_PHOTO_COMPOSITION.hero_right;
 }
 
@@ -163,7 +165,7 @@ export function layoutPillarBudget(
 }
 
 export function pickSinglePosterLayout(seed: string): PosterLayoutId {
-  const pool = AUTO_POSTER_LAYOUTS.filter((id) => POSTER_LAYOUTS[id]);
+  const pool = AUTO_POSTER_LAYOUTS.filter((id) => id in POSTER_LAYOUTS);
   const idx = hashSeed(seed || 'poster') % pool.length;
   return pool[idx]!;
 }

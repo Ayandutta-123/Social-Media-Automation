@@ -910,9 +910,10 @@ function AiAssistantInner() {
           <div>
             <p className="text-base font-semibold">Pick an image format</p>
             <p className="helper-text mt-0.5">
-              Each format ships three designed layouts. After you pick one, choose a ContentPilot
-              template, your Brand Studio plate, or a free AI poster. Colours and fonts always come
-              from your Brand Kit in Settings.
+              Each format ships three ready-made layouts, like Canva templates. Pick one and the AI
+              writes the copy and creates the photo inside that exact layout. You can also use your
+              Brand Studio plate or a free AI poster. Colours, fonts and logo always come from your
+              Brand Kit in Settings.
             </p>
           </div>
           <ProcessingButton

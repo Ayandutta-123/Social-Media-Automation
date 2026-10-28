@@ -405,10 +405,16 @@ function TemplateThumb({ template, kit }: { template: PosterTemplate; kit: Brand
   const { layout, blocks } = template;
 
   if (template.previewUrl) {
+    // Drawn templates are re-rendered when the Brand Kit changes, so key the URL on its colours.
+    const bust =
+      template.origin === 'upload'
+        ? ''
+        : `?k=${[kit.colors.background, kit.colors.accent, kit.colors.text].map((c) => c.replace('#', '')).join('')}`;
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={template.previewUrl}
+        loading="lazy"
+        src={`${template.previewUrl}${bust}`}
         alt={template.label}
         className="absolute inset-0 size-full object-cover"
       />
@@ -662,7 +668,7 @@ export function PosterTemplatePicker({
           >
             <div
               className={`relative w-full overflow-hidden border-b border-[hsl(var(--border))] ${
-                t.playId === 'offer' || t.origin === 'upload' ? 'aspect-square' : 'aspect-[4/5]'
+                t.playId === 'offer' || t.origin === 'upload' || t.previewUrl ? 'aspect-square' : 'aspect-[4/5]'
               }`}
             >
               <TemplateThumb template={t} kit={kit} />
@@ -729,7 +735,7 @@ export function PosterTemplateStrip({
 
 /** Explains that a chosen template is enforced, and where the colours come from. */
 export function TemplateLockNote({ template }: { template: PosterTemplate }) {
-  if (template.origin === 'upload' || template.previewUrl) {
+  if (template.origin === 'upload') {
     return (
       <div className="flex items-start gap-2.5 rounded-xl border border-brand-500/25 bg-brand-500/[0.06] p-3">
         <Lock size={14} className="mt-0.5 shrink-0 text-brand-600" />

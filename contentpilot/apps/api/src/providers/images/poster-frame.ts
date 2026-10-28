@@ -64,7 +64,7 @@ const ICON_PATHS: Record<PosterIconId, string> = {
   cloud: '<path d="M7 18h10a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.6-1.2A3.9 3.9 0 0 0 7 18z"/>',
 };
 
-function iconSvg(icon: PosterIconId | string, x: number, y: number, size: number, stroke: string): string {
+export function iconSvg(icon: PosterIconId | string, x: number, y: number, size: number, stroke: string): string {
   const key = (icon in ICON_PATHS ? icon : 'spark') as PosterIconId;
   const scale = size / 24;
   return `<g transform="translate(${x} ${y}) scale(${scale.toFixed(4)})" fill="none" stroke="${stroke}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[key]}</g>`;
@@ -107,7 +107,9 @@ export type PosterLayoutId =
   | 'sale_circles'
   | 'sale_split'
   /** Locked plate from an uploaded finished poster (Brand Kit fills slots only). */
-  | 'uploaded_master';
+  | 'uploaded_master'
+  /** Drawn Canva-style template: `design_<templateId>` (see poster-designs.ts). */
+  | `design_${string}`;
 
 type PosterLayoutGeom = {
   /** Where the hero artwork sits on the canvas. */
@@ -143,7 +145,10 @@ type PosterLayoutGeom = {
   logoInStack?: boolean;
 };
 
-export const POSTER_LAYOUTS: Record<PosterLayoutId, PosterLayoutGeom> = {
+/** Layouts drawn by this file's compositor (everything except `design_*` templates). */
+export type LegacyPosterLayoutId = Exclude<PosterLayoutId, `design_${string}`>;
+
+export const POSTER_LAYOUTS: Record<LegacyPosterLayoutId, PosterLayoutGeom> = {
   // Hero art bleeding in from the right, type in a left column — premium editorial.
   hero_right: {
     art: (w, h) => ({
@@ -282,7 +287,7 @@ export const POSTER_LAYOUTS: Record<PosterLayoutId, PosterLayoutGeom> = {
   },
 };
 
-export const POSTER_LAYOUT_IDS = Object.keys(POSTER_LAYOUTS) as PosterLayoutId[];
+export const POSTER_LAYOUT_IDS = Object.keys(POSTER_LAYOUTS) as LegacyPosterLayoutId[];
 
 function sanitizeLine(s: string | undefined | null, max: number): string {
   return (s || '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -410,6 +415,26 @@ export async function brandPosterFrame(opts: {
   }
 
   const spec = opts.spec;
+
+  // Drawn Canva-style templates: one composition per template id.
+  if (opts.layout && opts.layout.startsWith('design_')) {
+    const { writeDesignedPoster, templateIdFromLayout } = await import('./poster-designs');
+    return writeDesignedPoster({
+      tenantId: opts.tenantId,
+      templateId: templateIdFromLayout(opts.layout),
+      width,
+      height,
+      artHref,
+      logoHref,
+      companyName: opts.companyName,
+      headingFont,
+      bodyFont,
+      spec,
+      palette: colors,
+      slideLabel: opts.slideLabel,
+    });
+  }
+
   const fillLayout =
     opts.layout === 'uploaded_master'
       ? opts.fillLayout || 'uploaded_master'
@@ -487,7 +512,8 @@ export async function brandPosterFrame(opts: {
     .filter((p) => p.title || p.text)
     .slice(0, 2); // never more than 2 on auto plates — keeps studio-grade whitespace
 
-  const layout: PosterLayoutId = opts.layout && POSTER_LAYOUTS[opts.layout] ? opts.layout : 'hero_right';
+  const layout: LegacyPosterLayoutId =
+    opts.layout && opts.layout in POSTER_LAYOUTS ? (opts.layout as LegacyPosterLayoutId) : 'hero_right';
   const geom = POSTER_LAYOUTS[layout];
   const hasStat = Boolean(statValue);
   const hasCallout = Boolean(calloutTitle || calloutBody);
