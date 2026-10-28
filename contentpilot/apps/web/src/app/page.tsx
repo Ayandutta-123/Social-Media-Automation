@@ -61,7 +61,8 @@ export default function LoginPage() {
           },
         });
         await refresh();
-        router.push('/dashboard');
+        // New accounts run on their own API keys, so start where they add them.
+        router.push('/settings?tab=integrations');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed');

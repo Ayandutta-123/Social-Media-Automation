@@ -42,10 +42,13 @@ function truncateSlackHeader(title: string): string {
 export class SlackNotificationProvider implements NotificationProvider {
   readonly name = 'slack';
 
-  constructor(private readonly webhookUrl?: string) {}
+  constructor(
+    private readonly webhookUrl?: string,
+    private readonly allowEnv = true,
+  ) {}
 
   async send(payload: NotificationPayload): Promise<void> {
-    const url = this.webhookUrl || appConfig.SLACK_WEBHOOK_URL;
+    const url = this.webhookUrl || (this.allowEnv ? appConfig.SLACK_WEBHOOK_URL : undefined);
     if (!url) {
       console.warn('[Notification] Slack webhook not configured, skipping');
       return;
@@ -159,7 +162,10 @@ function bodyToAdaptiveBlocks(body: string, skipFirstLine?: string): AdaptiveEle
 export class TeamsNotificationProvider implements NotificationProvider {
   readonly name = 'teams';
 
-  constructor(private readonly webhookUrl?: string) {}
+  constructor(
+    private readonly webhookUrl?: string,
+    private readonly allowEnv = true,
+  ) {}
 
   private buildAdaptive(
     payload: NotificationPayload,
@@ -261,7 +267,7 @@ export class TeamsNotificationProvider implements NotificationProvider {
     themeColor: string,
     icon?: string,
   ): Promise<void> {
-    const url = this.webhookUrl || appConfig.TEAMS_WEBHOOK_URL;
+    const url = this.webhookUrl || (this.allowEnv ? appConfig.TEAMS_WEBHOOK_URL : undefined);
     if (!url) {
       console.warn('[Notification] Teams webhook not configured, skipping');
       return;
@@ -311,6 +317,8 @@ class EmailNotificationProvider implements NotificationProvider {
       resendApiKey?: string;
       fromEmail?: string;
       toEmail?: string;
+      /** false = never fall back to the server's .env recipient / Resend key (companies on their own keys). */
+      allowEnv?: boolean;
     } = {},
   ) {}
 
@@ -321,12 +329,12 @@ class EmailNotificationProvider implements NotificationProvider {
   }
 
   private resolveTo(): string | null {
-    const to = (this.opts.toEmail || appConfig.NOTIFICATION_TO_EMAIL || '').trim();
+    const to = (this.opts.toEmail || (this.opts.allowEnv === false ? '' : appConfig.NOTIFICATION_TO_EMAIL) || '').trim();
     return to || null;
   }
 
   private resolveApiKey(): string | null {
-    const key = (this.opts.resendApiKey || appConfig.RESEND_API_KEY || '').trim();
+    const key = (this.opts.resendApiKey || (this.opts.allowEnv === false ? '' : appConfig.RESEND_API_KEY) || '').trim();
     return key || null;
   }
 
@@ -424,21 +432,23 @@ export function createNotificationProvider(
     teamsWebhookUrl?: string;
     resendApiKey?: string;
     notificationEmail?: string;
+    allowEnv?: boolean;
   },
 ): NotificationProvider {
   const name = providerName || appConfig.NOTIFICATION_PROVIDER;
   switch (name) {
     case 'teams':
-      return new TeamsNotificationProvider(webhooks?.teamsWebhookUrl);
+      return new TeamsNotificationProvider(webhooks?.teamsWebhookUrl, webhooks?.allowEnv);
     case 'email':
       return new EmailNotificationProvider({
         resendApiKey: webhooks?.resendApiKey,
         toEmail: webhooks?.notificationEmail,
         fromEmail: appConfig.NOTIFICATION_FROM_EMAIL,
+        allowEnv: webhooks?.allowEnv,
       });
     case 'slack':
     default:
-      return new SlackNotificationProvider(webhooks?.slackWebhookUrl);
+      return new SlackNotificationProvider(webhooks?.slackWebhookUrl, webhooks?.allowEnv);
   }
 }
 
@@ -453,6 +463,7 @@ async function resolveNotifier(tenantId?: string): Promise<NotificationProvider>
       teamsWebhookUrl: providers.teamsWebhookUrl,
       resendApiKey: providers.resendApiKey,
       notificationEmail: providers.notificationEmail,
+      allowEnv: providers.serverKeysAllowed,
     });
   } catch (err) {
     console.warn('[Notification] Failed to resolve tenant providers, using env defaults', err);
@@ -469,21 +480,23 @@ async function sendChatNotification(
 
   try {
     const providers = tenantId ? await resolveProviders(tenantId) : null;
-    const slackUrl = providers?.slackWebhookUrl || appConfig.SLACK_WEBHOOK_URL;
-    const teamsUrl = providers?.teamsWebhookUrl || appConfig.TEAMS_WEBHOOK_URL;
+    // With a tenant, resolveProviders already applied the server-key rule; never re-add .env values here.
+    const slackUrl = providers ? providers.slackWebhookUrl : appConfig.SLACK_WEBHOOK_URL;
+    const teamsUrl = providers ? providers.teamsWebhookUrl : appConfig.TEAMS_WEBHOOK_URL;
     const preferEmail = (providers?.notificationProvider || appConfig.NOTIFICATION_PROVIDER) === 'email';
 
     if (preferEmail) {
       const email = createNotificationProvider('email', {
         resendApiKey: providers?.resendApiKey,
         notificationEmail: providers?.notificationEmail,
+        allowEnv: providers?.serverKeysAllowed,
       });
       await email.send(payload);
       return;
     }
 
-    if (slackUrl) jobs.push(new SlackNotificationProvider(slackUrl).send(payload));
-    if (teamsUrl) jobs.push(new TeamsNotificationProvider(teamsUrl).send(payload));
+    if (slackUrl) jobs.push(new SlackNotificationProvider(slackUrl, providers?.serverKeysAllowed).send(payload));
+    if (teamsUrl) jobs.push(new TeamsNotificationProvider(teamsUrl, providers?.serverKeysAllowed).send(payload));
 
     if (!jobs.length) {
       // Email / preferred provider when no chat webhooks are saved
@@ -716,8 +729,8 @@ export async function sendTestEmailAlert(
 ): Promise<{ ok: true; id?: string; to: string } | { ok: false; error: string }> {
   try {
     const providers = await resolveProviders(tenantId);
-    const to = (overrideTo || providers.notificationEmail || appConfig.NOTIFICATION_TO_EMAIL || '').trim();
-    const key = (providers.resendApiKey || appConfig.RESEND_API_KEY || '').trim();
+    const to = (overrideTo || providers.notificationEmail || '').trim();
+    const key = (providers.resendApiKey || '').trim();
     if (!key) {
       return {
         ok: false,
@@ -734,6 +747,7 @@ export async function sendTestEmailAlert(
       resendApiKey: key,
       toEmail: to,
       fromEmail: appConfig.NOTIFICATION_FROM_EMAIL,
+      allowEnv: providers.serverKeysAllowed,
     });
     await provider.send({
       title: 'ContentPilot — Resend email test',

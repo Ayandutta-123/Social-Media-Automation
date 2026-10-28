@@ -2129,6 +2129,17 @@ function IntegrationsSettings() {
 
   return (
     <div className="space-y-4 pb-24">
+      {status?.usesServerKeys === false && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
+          <p className="font-semibold">Bring your own API keys</p>
+          <p className="mt-1 text-xs leading-relaxed">
+            Add your OpenAI or Anthropic key below, then your image key (fal.ai or OpenAI) and, for Trends and
+            Competitor research, a search key (Tavily or SerpAPI) and an Apify token. Drafting, images, scraping
+            and every automation use only the keys you save here. Alerts go only to the Slack, Teams or email
+            address you set.
+          </p>
+        </div>
+      )}
       <div className="rounded-xl border border-sky-500/25 bg-sky-500/[0.06] px-4 py-3 text-sm text-sky-950 dark:text-sky-100">
         <p className="font-semibold">Shared across all companies</p>
         <p className="mt-1 text-xs leading-relaxed text-sky-900/80 dark:text-sky-200/90">

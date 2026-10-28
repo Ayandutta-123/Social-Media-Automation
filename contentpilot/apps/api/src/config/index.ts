@@ -119,6 +119,14 @@ const ConfigSchema = z.object({
    */
   UPLOAD_DIR: z.string().default(''),
 
+  /**
+   * Who may fall back to the server's own provider keys (.env) when they have not saved their own.
+   *  - an ISO date: only companies created BEFORE it (default: companies that existed when this was introduced)
+   *  - "all":  every company (shared-key / single-tenant installs)
+   *  - "none": nobody — every company must add its own keys in Settings → Integrations
+   */
+  SERVER_KEYS_FOR_TENANTS_CREATED_BEFORE: z.string().default('2026-10-28T00:00:00Z'),
+
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60_000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(300),
 

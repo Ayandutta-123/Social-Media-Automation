@@ -14,6 +14,7 @@ import { APP_NAME, APP_TAGLINE } from '@/lib/brand';
 import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { BackButton, Spinner } from '@/components/ui';
+import { ApiKeysBanner } from '@/components/api-keys-banner';
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -115,7 +116,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
           </div>
         </header>
-        <main className="min-h-0 flex-1 overflow-auto pb-[env(safe-area-inset-bottom,0px)]">{children}</main>
+        <main className="min-h-0 flex-1 overflow-auto pb-[env(safe-area-inset-bottom,0px)]">
+          <ApiKeysBanner />
+          {children}
+        </main>
       </div>
     );
   }
@@ -323,6 +327,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           key={pathname}
           className="flex-1 overflow-auto p-3 pb-[calc(6.25rem+env(safe-area-inset-bottom,0px))] sm:p-4 md:p-6 md:pb-8 xl:p-8 animate-page-enter"
         >
+          <ApiKeysBanner />
           {children}
         </main>
 

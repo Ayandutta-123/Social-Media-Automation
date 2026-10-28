@@ -10,6 +10,8 @@ import {
 } from '@contentpilot/shared';
 
 export interface ResolvedProviders {
+  /** True when this company may use the server's .env keys as a fallback (see SERVER_KEYS_FOR_TENANTS_CREATED_BEFORE). */
+  serverKeysAllowed: boolean;
   llmProvider: 'openai' | 'claude';
   llmModel: string;
   openaiApiKey?: string;
@@ -177,8 +179,37 @@ function decryptMaybe(v: string | null | undefined) {
   }
 }
 
+
+const serverKeyCache = new Map<string, { allowed: boolean; at: number }>();
+const SERVER_KEY_CACHE_MS = 5 * 60 * 1000;
+
+/**
+ * Companies that signed up after the cutoff must bring their own API keys; they never
+ * spend the operator's keys (or receive alerts through the operator's Slack / Teams / email).
+ */
+export async function serverKeysAllowed(tenantId: string): Promise<boolean> {
+  const rule = (config.SERVER_KEYS_FOR_TENANTS_CREATED_BEFORE || '').trim().toLowerCase();
+  if (rule === 'all') return true;
+  if (rule === 'none' || !rule) return false;
+  const cutoff = Date.parse(config.SERVER_KEYS_FOR_TENANTS_CREATED_BEFORE);
+  if (!Number.isFinite(cutoff)) return false; // unparseable → fail closed
+
+  const hit = serverKeyCache.get(tenantId);
+  if (hit && Date.now() - hit.at < SERVER_KEY_CACHE_MS) return hit.allowed;
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { createdAt: true } });
+  const allowed = Boolean(tenant && tenant.createdAt.getTime() < cutoff);
+  serverKeyCache.set(tenantId, { allowed, at: Date.now() });
+  return allowed;
+}
+
+/** Env fallback for one setting: the .env value only when this company is allowed to use server keys. */
+function envFallback<T>(allowed: boolean, value: T | undefined): T | undefined {
+  return allowed ? value : undefined;
+}
+
 export async function getProviderSettingsPublic(tenantId: string) {
   const row = await resolveProviderSettingsRow(tenantId);
+  const serverKeys = await serverKeysAllowed(tenantId);
   // *Set = saved on this account (shared across companies).
   // Env fallbacks still work at runtime via resolveProviders, but do not fake "Saved".
   return {
@@ -190,8 +221,8 @@ export async function getProviderSettingsPublic(tenantId: string) {
     })(),
     openaiApiKeySet: mask(row?.openaiApiKey),
     claudeApiKeySet: mask(row?.claudeApiKey),
-    claudeWorkspaceId: row?.claudeWorkspaceId || config.ANTHROPIC_WORKSPACE_ID || '',
-    claudeWorkspaceIdSet: mask(row?.claudeWorkspaceId) || mask(config.ANTHROPIC_WORKSPACE_ID),
+    claudeWorkspaceId: row?.claudeWorkspaceId || envFallback(serverKeys, config.ANTHROPIC_WORKSPACE_ID) || '',
+    claudeWorkspaceIdSet: mask(row?.claudeWorkspaceId) || mask(envFallback(serverKeys, config.ANTHROPIC_WORKSPACE_ID)),
     imageProvider: row?.imageProvider ?? config.IMAGE_PROVIDER,
     falModel: row?.falModel ?? config.FAL_MODEL,
     falApiKeySet: mask(row?.falApiKey),
@@ -205,8 +236,10 @@ export async function getProviderSettingsPublic(tenantId: string) {
     notificationProvider: row?.notificationProvider ?? config.NOTIFICATION_PROVIDER,
     slackWebhookUrlSet: mask(row?.slackWebhookUrl),
     teamsWebhookUrlSet: mask(row?.teamsWebhookUrl),
-    resendApiKeySet: mask(row?.resendApiKey) || mask(config.RESEND_API_KEY),
-    notificationEmail: row?.notificationEmail || config.NOTIFICATION_TO_EMAIL || '',
+    resendApiKeySet: mask(row?.resendApiKey) || mask(envFallback(serverKeys, config.RESEND_API_KEY)),
+    notificationEmail: row?.notificationEmail || envFallback(serverKeys, config.NOTIFICATION_TO_EMAIL) || '',
+    /** false = this company must add its own API keys in Settings → Integrations before AI / automation will run. */
+    usesServerKeys: serverKeys,
     soundAlertsEnabled: row?.soundAlertsEnabled ?? true,
     trendsMode: (row?.trendsMode === 'auto' ? 'auto' : 'manual') as 'manual' | 'auto',
     competitorMode: (row?.competitorMode === 'auto' ? 'auto' : 'manual') as 'manual' | 'auto',
@@ -226,8 +259,10 @@ export async function getProviderSettingsPublic(tenantId: string) {
 
 export async function resolveProviders(tenantId: string): Promise<ResolvedProviders> {
   const row = await resolveProviderSettingsRow(tenantId);
+  const sk = await serverKeysAllowed(tenantId);
 
   return {
+    serverKeysAllowed: sk,
     llmProvider: (row?.llmProvider as 'openai' | 'claude') || config.LLM_PROVIDER,
     llmModel: (() => {
       const raw = row?.llmModel || config.LLM_MODEL;
@@ -236,25 +271,25 @@ export async function resolveProviders(tenantId: string): Promise<ResolvedProvid
     })(),
     openaiApiKey: (() => {
       try {
-        return sanitizeApiSecret(decryptMaybe(row?.openaiApiKey) || config.OPENAI_API_KEY) || undefined;
+        return sanitizeApiSecret(decryptMaybe(row?.openaiApiKey) || envFallback(sk, config.OPENAI_API_KEY)) || undefined;
       } catch {
         return undefined;
       }
     })(),
     claudeApiKey: (() => {
       try {
-        return sanitizeApiSecret(decryptMaybe(row?.claudeApiKey) || config.ANTHROPIC_API_KEY) || undefined;
+        return sanitizeApiSecret(decryptMaybe(row?.claudeApiKey) || envFallback(sk, config.ANTHROPIC_API_KEY)) || undefined;
       } catch {
         return undefined;
       }
     })(),
-    claudeWorkspaceId: row?.claudeWorkspaceId || config.ANTHROPIC_WORKSPACE_ID || undefined,
+    claudeWorkspaceId: row?.claudeWorkspaceId || envFallback(sk, config.ANTHROPIC_WORKSPACE_ID) || undefined,
     imageProvider: (row?.imageProvider as 'fal' | 'openai') || config.IMAGE_PROVIDER,
     falModel: row?.falModel || config.FAL_MODEL,
     imageRoutingMode: (row?.imageRoutingMode === 'manual' ? 'manual' : 'auto') as 'auto' | 'manual',
     falApiKey: (() => {
       try {
-        return sanitizeApiSecret(decryptMaybe(row?.falApiKey) || config.FAL_API_KEY) || undefined;
+        return sanitizeApiSecret(decryptMaybe(row?.falApiKey) || envFallback(sk, config.FAL_API_KEY)) || undefined;
       } catch {
         return undefined;
       }
@@ -262,14 +297,14 @@ export async function resolveProviders(tenantId: string): Promise<ResolvedProvid
     searchProvider: (row?.searchProvider as 'tavily' | 'serpapi') || config.SEARCH_PROVIDER,
     tavilyApiKey: (() => {
       try {
-        return sanitizeApiSecret(decryptMaybe(row?.tavilyApiKey) || config.TAVILY_API_KEY) || undefined;
+        return sanitizeApiSecret(decryptMaybe(row?.tavilyApiKey) || envFallback(sk, config.TAVILY_API_KEY)) || undefined;
       } catch {
         return undefined;
       }
     })(),
     serpapiApiKey: (() => {
       try {
-        return sanitizeApiSecret(decryptMaybe(row?.serpapiApiKey) || config.SERPAPI_API_KEY) || undefined;
+        return sanitizeApiSecret(decryptMaybe(row?.serpapiApiKey) || envFallback(sk, config.SERPAPI_API_KEY)) || undefined;
       } catch {
         return undefined;
       }
@@ -277,29 +312,29 @@ export async function resolveProviders(tenantId: string): Promise<ResolvedProvid
     scrapingProvider: 'apify',
     apifyApiToken: (() => {
       try {
-        return sanitizeApiSecret(decryptMaybe(row?.apifyApiToken) || config.APIFY_API_TOKEN) || undefined;
+        return sanitizeApiSecret(decryptMaybe(row?.apifyApiToken) || envFallback(sk, config.APIFY_API_TOKEN)) || undefined;
       } catch {
         return undefined;
       }
     })(),
     placidApiKey: (() => {
       try {
-        return sanitizeApiSecret(decryptMaybe(row?.placidApiKey) || config.PLACID_API_KEY) || undefined;
+        return sanitizeApiSecret(decryptMaybe(row?.placidApiKey) || envFallback(sk, config.PLACID_API_KEY)) || undefined;
       } catch {
         return undefined;
       }
     })(),
     notificationProvider: row?.notificationProvider || config.NOTIFICATION_PROVIDER,
-    slackWebhookUrl: decryptMaybe(row?.slackWebhookUrl) || config.SLACK_WEBHOOK_URL,
-    teamsWebhookUrl: decryptMaybe(row?.teamsWebhookUrl) || config.TEAMS_WEBHOOK_URL,
+    slackWebhookUrl: decryptMaybe(row?.slackWebhookUrl) || envFallback(sk, config.SLACK_WEBHOOK_URL),
+    teamsWebhookUrl: decryptMaybe(row?.teamsWebhookUrl) || envFallback(sk, config.TEAMS_WEBHOOK_URL),
     resendApiKey: (() => {
       try {
-        return sanitizeApiSecret(decryptMaybe(row?.resendApiKey) || config.RESEND_API_KEY) || undefined;
+        return sanitizeApiSecret(decryptMaybe(row?.resendApiKey) || envFallback(sk, config.RESEND_API_KEY)) || undefined;
       } catch {
         return undefined;
       }
     })(),
-    notificationEmail: row?.notificationEmail || config.NOTIFICATION_TO_EMAIL || undefined,
+    notificationEmail: row?.notificationEmail || envFallback(sk, config.NOTIFICATION_TO_EMAIL) || undefined,
     soundAlertsEnabled: row?.soundAlertsEnabled ?? true,
     trendsMode: row?.trendsMode === 'auto' ? 'auto' : 'manual',
     competitorMode: row?.competitorMode === 'auto' ? 'auto' : 'manual',

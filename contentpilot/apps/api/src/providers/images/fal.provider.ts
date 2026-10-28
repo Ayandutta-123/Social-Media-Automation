@@ -146,7 +146,7 @@ export async function generateImageWithFal(
   format: SocialImageFormat = 'instagram_square',
   negativePrompt?: string | null,
 ): Promise<FalImageResult> {
-  const apiKey = providers.falApiKey || config.FAL_API_KEY;
+  const apiKey = providers.falApiKey;
   if (!apiKey) {
     throw new Error('Image API key not configured. Add it in Settings → Integrations.');
   }
@@ -359,7 +359,7 @@ export async function generateImageWithFalReference(
   strength = 0.55,
   editMode = false,
 ): Promise<FalImageResult> {
-  const apiKey = providers.falApiKey || config.FAL_API_KEY;
+  const apiKey = providers.falApiKey;
   if (!apiKey) {
     throw new ImageModelUnavailableError(
       `${explainMissingPremium(providers)} A fal.ai key is required for reference-guided images.`,
@@ -442,7 +442,7 @@ export async function generateContentImage(
     : styledPrompt;
 
   // Prefer fal img2img when a brand reference is attached
-  if (opts.referenceImageUrl && (providers.falApiKey || config.FAL_API_KEY)) {
+  if (opts.referenceImageUrl && (providers.falApiKey)) {
     try {
       return await generateImageWithFalReference(
         providers,
@@ -474,7 +474,7 @@ export async function generateContentImage(
     return generateImageWithOpenAI(providers, fullPrompt, format);
   }
 
-  if (!providers.falApiKey && !config.FAL_API_KEY) {
+  if (!providers.falApiKey) {
     return null;
   }
 
