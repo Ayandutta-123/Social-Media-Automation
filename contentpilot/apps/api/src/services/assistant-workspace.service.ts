@@ -196,6 +196,21 @@ USER: ${input.message}`,
   if (!['chat', 'social_text', 'long_form', 'image_create', 'image_edit'].includes(kind)) {
     kind = requestedMode === 'image' ? (activeContent?.imageUrl ? 'image_edit' : 'image_create') : 'chat';
   }
+  // The user's explicit choices win over the model's guess: a picked format/template or the Image
+  // switch must produce a visual, and the Text switch must never produce one.
+  const isImageKind = kind === 'image_create' || kind === 'image_edit';
+  if (requestedMode === 'text' && isImageKind) {
+    kind = 'chat';
+  } else if (requestedMode !== 'text' && !isImageKind) {
+    if (input.preferredPlay || input.posterTemplateId) {
+      kind = 'image_create';
+    } else if (requestedMode === 'image') {
+      kind = activeContent?.imageUrl || (input.attachmentRole === 'edit' && input.attachmentUrl)
+        ? 'image_edit'
+        : 'image_create';
+    }
+  }
+  let brandResult: Awaited<ReturnType<typeof runBrandAssistant>> | null = null;
 
   if (kind === 'image_create') {
     const result = await runBrandAssistant({
@@ -213,6 +228,7 @@ USER: ${input.message}`,
       preferredPlay: input.preferredPlay,
       posterTemplateId: input.posterTemplateId,
     });
+    brandResult = result;
     assistantMessage = result.assistantMessage;
     contentId = result.contentId || null;
     preview = result.preview;
@@ -324,7 +340,11 @@ USER: ${input.message}`,
       role: 'assistant',
       content: assistantMessage,
       contentId,
-      metadata: { kind, preview: preview || null } as Prisma.InputJsonValue,
+      metadata: {
+        kind,
+        preview: preview || null,
+        ...(brandResult?.playId ? { playId: brandResult.playId } : {}),
+      } as Prisma.InputJsonValue,
     },
   });
   const updatedConversation = await prisma.assistantConversation.update({
@@ -342,10 +362,12 @@ USER: ${input.message}`,
     conversationId: conversation.id,
     conversationTitle: updatedConversation.title,
     messageId: savedAssistant.id,
-    action: kind,
+    action: brandResult?.action ?? kind,
     assistantMessage,
     contentId,
     preview,
+    playId: brandResult?.playId ?? null,
+    suggestions: brandResult?.suggestions,
     memoryEnabled,
     approvalStatus: contentId ? 'assistant_draft' : null,
   };

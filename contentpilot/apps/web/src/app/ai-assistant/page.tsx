@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { AuthGuard } from '@/components/auth-guard';
@@ -279,6 +279,9 @@ function AiAssistantInner() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [historyError, setHistoryError] = useState('');
+  /** True once the user has sent anything this visit, so a late history load cannot replace their chat. */
+  const chatStartedRef = useRef(false);
   const [llmWarning, setLlmWarning] = useState('');
   const [activePlayId, setActivePlayId] = useState<string | null>(null);
   const [briefPlay, setBriefPlay] = useState<PlaySuggestion | null>(null);
@@ -405,29 +408,38 @@ function AiAssistantInner() {
     );
   };
 
+  const loadHistory = useCallback(async (isCancelled: () => boolean = () => false) => {
+    setHistoryError('');
+    try {
+      const [conversationRes, memoryRes] = await Promise.all([
+        api<{ data: AssistantConversation[] }>('/brand/chat/conversations'),
+        api<{ data: { enabled: boolean; memories: AssistantMemory[] } }>('/brand/chat/memory'),
+      ]);
+      if (isCancelled()) return;
+      setConversations(conversationRes.data || []);
+      setMemoryEnabled(memoryRes.data.enabled);
+      setMemories(memoryRes.data.memories || []);
+      // Resume the latest chat, unless the user has already started typing into a new one.
+      if (conversationRes.data?.[0]?.id && !chatStartedRef.current) {
+        await openConversation(conversationRes.data[0].id);
+      }
+    } catch (e) {
+      if (isCancelled()) return;
+      // Never fail silently: an empty-looking history with no explanation reads as "nothing was saved".
+      setHistoryError(
+        `Could not load your saved chats and memory${e instanceof Error && e.message ? ` (${e.message})` : ''}.`,
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const [conversationRes, memoryRes] = await Promise.all([
-          api<{ data: AssistantConversation[] }>('/brand/chat/conversations'),
-          api<{ data: { enabled: boolean; memories: AssistantMemory[] } }>('/brand/chat/memory'),
-        ]);
-        if (cancelled) return;
-        setConversations(conversationRes.data || []);
-        setMemoryEnabled(memoryRes.data.enabled);
-        setMemories(memoryRes.data.memories || []);
-        if (conversationRes.data?.[0]?.id) {
-          await openConversation(conversationRes.data[0].id);
-        }
-      } catch {
-        // A new tenant may have no conversations/settings yet.
-      }
-    })();
+    void loadHistory(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadHistory]);
 
   const startNewConversation = async () => {
     const res = await api<{ data: AssistantConversation }>('/brand/chat/conversations', {
@@ -581,6 +593,7 @@ function AiAssistantInner() {
     }
 
     setMessage('');
+    chatStartedRef.current = true;
     const history = chatLog.map((m) => ({ role: m.role, content: m.text }));
     setChatLog((l) => [...l, { role: 'user', text: userMsg }]);
     abortRef.current?.abort();
@@ -589,6 +602,22 @@ function AiAssistantInner() {
     setBusy(true);
     setError('');
     try {
+      // Own the conversation before sending, so a failed turn keeps its chat (and the next try joins it)
+      // instead of leaving an invisible half-saved conversation behind.
+      let activeConversationId = conversationId;
+      if (!activeConversationId) {
+        try {
+          const created = await api<{ data: AssistantConversation }>('/brand/chat/conversations', {
+            method: 'POST',
+            body: {},
+          });
+          activeConversationId = created.data.id;
+          setConversationId(activeConversationId);
+          setConversations((items) => [created.data, ...items]);
+        } catch {
+          // The send below still creates one on the server.
+        }
+      }
       const res = await api<{
         data: {
           assistantMessage: string;
@@ -605,7 +634,7 @@ function AiAssistantInner() {
       }>('/brand/chat', {
         method: 'POST',
         body: {
-          conversationId,
+          conversationId: activeConversationId,
           activeContentId,
           brandTemplateId: mode === 'existing_template' ? selectedId : null,
           visualMode: mode,
@@ -614,7 +643,8 @@ function AiAssistantInner() {
           includeLogo: mode === 'new_poster' ? includeLogo : undefined,
           referenceImageUrl: mode === 'new_poster' ? referenceUrl : undefined,
           attachmentRole: referenceUrl ? attachmentRole : undefined,
-          outputMode,
+          // Picking a format or template is an explicit "make the visual" — don't leave it to the Auto guess.
+          outputMode: outputMode === 'auto' && (preferred || templateForSend) ? 'image' : outputMode,
           imageFormat: mode === 'new_poster' ? imageFormat : undefined,
           preferredPlay: preferred || undefined,
           posterTemplateId: templateForSend || undefined,
@@ -886,6 +916,14 @@ function AiAssistantInner() {
           <Link href="/settings" className="underline font-medium">
             Open Settings
           </Link>
+        </InlineNotice>
+      )}
+      {historyError && (
+        <InlineNotice kind="error">
+          {historyError}{' '}
+          <button type="button" className="font-semibold underline" onClick={() => void loadHistory()}>
+            Retry
+          </button>
         </InlineNotice>
       )}
       {error && <InlineNotice kind="error">{error}</InlineNotice>}
