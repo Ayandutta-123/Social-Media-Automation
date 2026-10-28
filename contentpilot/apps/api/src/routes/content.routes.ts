@@ -2343,6 +2343,47 @@ export async function contentRoutes(app: FastifyInstance) {
     return { success: true, data: result };
   });
 
+  /** Post an already-published item again (e.g. to another channel, or to bring it back to the top of the feed). */
+  app.post('/:id/republish', { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = z.object({
+      platforms: z.array(z.enum(['instagram', 'linkedin', 'facebook', 'twitter'])).min(1),
+    }).parse(request.body);
+    const tenantId = request.session.tenantId!;
+
+    const content = await prisma.generatedContent.findFirst({
+      where: { id, tenantId, deletedAt: null },
+      select: { id: true, status: true, imageUrl: true },
+    });
+    if (!content) return reply.status(404).send({ success: false, error: 'Post not found.' });
+    if (content.status !== 'published') {
+      return reply.status(409).send({
+        success: false,
+        error: content.status === 'publishing' ? 'This post is already being published.' : 'Only published posts can be republished.',
+      });
+    }
+
+    const connections = await prisma.platformConnection.findMany({
+      where: { tenantId, isActive: true },
+      select: { platform: true },
+    });
+    const allowed = new Set(connections.map((c) => c.platform as string));
+    const platforms = [...new Set(body.platforms)].filter((p) => allowed.has(p));
+    if (!platforms.length) {
+      return reply.status(400).send({ success: false, error: 'Select at least one connected channel to post.' });
+    }
+
+    const { executionLogService } = await import('../services/execution-log.service');
+    await executionLogService.log({
+      tenantId,
+      contentId: id,
+      workflowStep: 'publish:republish',
+      message: `republish channels=${platforms.join(',')} by=${request.session.userId}`,
+    });
+    await enqueuePublishing(id, tenantId, platforms);
+    return { success: true, data: { id, platforms } };
+  });
+
   app.get('/', { preHandler: requireAuth }, async (request) => {
     const query = request.query as { status?: string; page?: string; pageSize?: string };
     const page = parseInt(query.page ?? '1', 10);
@@ -2393,6 +2434,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
           targetPlatforms: true,
           imageUrl: true,
           engine: true,
+          templateSlots: true,
           createdAt: true,
           publishedAt: true,
           publishLogs: {
@@ -2409,7 +2451,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
       }),
       prisma.platformConnection.findMany({
         where: { tenantId },
-        select: { platform: true, accountId: true, accountName: true },
+        select: { platform: true, accountId: true, accountName: true, isActive: true },
       }),
     ]);
 
@@ -2452,8 +2494,10 @@ export async function dashboardRoutes(app: FastifyInstance) {
         imageUrl: item.imageUrl,
         publishedAt: item.publishedAt,
         platforms,
+        slides: (extractCarouselForFormat(item.templateSlots)?.slides ?? []).map((sl) => sl.imageUrl),
         publishLogs: item.publishLogs,
-        links: item.publishLogs.map((log) => ({
+        // A republish adds a second log per channel; show only the newest link for each.
+        links: [...new Map(item.publishLogs.map((log) => [log.platform as string, log])).values()].map((log) => ({
           platform: log.platform as string,
           url: resolvePostUrl(log),
           platformPostId: log.platformPostId,
@@ -2469,7 +2513,11 @@ export async function dashboardRoutes(app: FastifyInstance) {
 
     return {
       success: true,
-      data: { published, publishedContent },
+      data: {
+        published,
+        publishedContent,
+        connectedPlatforms: connections.filter((c) => c.isActive).map((c) => ({ platform: c.platform as string, accountName: c.accountName })),
+      },
     };
   });
 
