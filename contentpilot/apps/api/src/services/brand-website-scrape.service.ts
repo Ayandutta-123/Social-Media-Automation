@@ -3,6 +3,7 @@ import { resolveProviders } from './providers.service';
 import { resolveClaudeModelId } from '@contentpilot/shared';
 import { defaultBrandKit, type BrandKitColors } from '../lib/brand-kit';
 import { buildPaletteFromCssSources, extractStylesheetUrls } from './extract-site-palette';
+import { extractSocialLinks } from '../lib/source-grounding';
 
 const MAX_PAGES = 8;
 const MAX_CHARS_PER_PAGE = 8000;
@@ -97,22 +98,12 @@ function extractContactsFromCorpus(corpus: string): {
   const mailto = corpus.match(/mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
   if (mailto?.[1]) out.contactEmail = mailto[1].toLowerCase();
 
-  const pick = (re: RegExp) => {
-    const m = corpus.match(re);
-    return m?.[1] ? m[1].replace(/["'>\s].*$/, '').replace(/\/$/, '') : '';
-  };
-
-  const ig = pick(/https?:\/\/(?:www\.)?instagram\.com\/([A-Za-z0-9._/-]+)/i);
-  if (ig) out.instagramUrl = `https://instagram.com/${ig.split('/')[0]}`;
-
-  const li = pick(/https?:\/\/(?:www\.)?linkedin\.com\/(?:company|in)\/([A-Za-z0-9._%-]+)/i);
-  if (li) out.linkedinUrl = `https://www.linkedin.com/company/${li}`;
-
-  const fb = pick(/https?:\/\/(?:www\.)?facebook\.com\/([A-Za-z0-9._%-]+)/i);
-  if (fb && !/sharer|share\.php/i.test(fb)) out.facebookUrl = `https://facebook.com/${fb}`;
-
-  const tw = pick(/https?:\/\/(?:www\.)?(?:twitter|x)\.com\/([A-Za-z0-9_]+)/i);
-  if (tw && !/intent|share/i.test(tw)) out.twitterUrl = `https://x.com/${tw}`;
+  // Shared extractor: skips share/intent/post links and personal LinkedIn profiles.
+  const social = extractSocialLinks(corpus);
+  if (social.instagram) out.instagramUrl = social.instagram;
+  if (social.linkedin) out.linkedinUrl = social.linkedin;
+  if (social.facebook) out.facebookUrl = social.facebook;
+  if (social.twitter) out.twitterUrl = social.twitter;
 
   return out;
 }
@@ -407,7 +398,11 @@ Return ONLY a JSON object with these keys (strings unless noted):
 - targetAudience (who they sell to / partner with in B2B)
 - imageStyle (visual direction for social images — photography / lighting / mood only, NOT fonts or hex colours)
 - hashtagStrategy (short guidance)
-Be specific to THIS company. Do not invent fake products. If unclear, write a careful best-effort from the site. Do NOT return colour hex codes or font family names.`,
+Be specific to THIS company and use only what the pages say or clearly imply.
+- If a field is not stated or clearly implied by the pages, return an empty string. Never guess or fill in generic marketing language.
+- Do not invent products, customers, numbers, awards, locations or claims. contentGuidelines may list only claims that appear on the site.
+- Use the company's own names and wording for companyName, productName and productTagline.
+Do NOT return colour hex codes or font family names.`,
     userPrompt: `Website: ${origin.toString()}\nLLM: ${llmProvider}/${llmModel}\nPages scraped: ${pages.length}\n\n${corpus}`,
     maxRetries: 2,
   });

@@ -136,6 +136,14 @@ export async function listScrapedCompetitorPosts(
   }));
 }
 
+const MIN_USEFUL_CAPTION_CHARS = 40;
+const MAX_POST_AGE_DAYS = 90;
+
+/**
+ * Highest-scoring post that is worth writing about: not already turned into content, has a real
+ * caption (so the model is not left to invent one from a bare image), and is recent. Each filter
+ * falls back to the previous list when it would leave nothing, so an automation still runs.
+ */
 export async function pickBestScrapedPost(
   tenantId: string,
   competitorId?: string,
@@ -144,9 +152,27 @@ export async function pickBestScrapedPost(
   const posts = await listScrapedCompetitorPosts(tenantId, {
     competitorId,
     platforms,
-    limit: 40,
+    limit: 100,
   });
-  return posts[0] || null;
+  if (!posts.length) return null;
+
+  const refs = posts.flatMap((p) => [p.postUrl, `scraped:${p.id}`]).filter(Boolean) as string[];
+  const usedRows = await prisma.generatedContent.findMany({
+    where: { tenantId, deletedAt: null, sourceReference: { in: refs } },
+    select: { sourceReference: true },
+  });
+  const used = new Set(usedRows.map((r) => r.sourceReference));
+  let pool = posts.filter((p) => !used.has(p.postUrl) && !used.has(`scraped:${p.id}`));
+  if (!pool.length) pool = posts; // everything used before: reuse rather than fail the run
+
+  const withCaption = pool.filter((p) => (p.content || '').trim().length >= MIN_USEFUL_CAPTION_CHARS);
+  if (withCaption.length) pool = withCaption;
+
+  const cutoff = Date.now() - MAX_POST_AGE_DAYS * 86_400_000;
+  const recent = pool.filter((p) => !p.postedAt || new Date(p.postedAt).getTime() >= cutoff);
+  if (recent.length) pool = recent;
+
+  return pool[0] || null;
 }
 
 /** Networks we can scrape via Apify for Competitor Monitor. */

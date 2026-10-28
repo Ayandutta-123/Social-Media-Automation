@@ -3,6 +3,7 @@ import { LLMService } from './llm.service';
 import { resolveProviders } from './providers.service';
 import { createSearchProvider, type SearchResult } from '../providers/search';
 import { scrapeBrandWebsite } from './brand-website-scrape.service';
+import { extractSocialLinks, fetchPage, slugMatchesName } from '../lib/source-grounding';
 
 const MAX_COMPETITORS = 12;
 const MAX_TOPICS = 15;
@@ -32,25 +33,9 @@ function ensureUrl(raw: string): string | null {
   }
 }
 
+/** Clean profile URLs only: no share/intent/post links, no personal LinkedIn pages. */
 function extractSocialUrlsFromText(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  const ig = text.match(/https?:\/\/(?:www\.)?instagram\.com\/([A-Za-z0-9._]+)/i);
-  if (ig?.[1] && !/p\/|reel\/|stories\//i.test(ig[0])) {
-    out.instagram = `https://instagram.com/${ig[1]}`;
-  }
-  const fb = text.match(/https?:\/\/(?:www\.)?facebook\.com\/([A-Za-z0-9.]+)/i);
-  if (fb?.[1] && !/sharer|share\.php/i.test(fb[0])) {
-    out.facebook = `https://facebook.com/${fb[1]}`;
-  }
-  const li = text.match(/https?:\/\/(?:www\.)?linkedin\.com\/(?:company|in)\/([A-Za-z0-9._%-]+)/i);
-  if (li?.[1]) {
-    out.linkedin = `https://www.linkedin.com/company/${li[1]}`;
-  }
-  const tw = text.match(/https?:\/\/(?:www\.)?(?:twitter|x)\.com\/([A-Za-z0-9_]+)/i);
-  if (tw?.[1] && !/intent|share/i.test(tw[1])) {
-    out.twitter = `https://x.com/${tw[1]}`;
-  }
-  return out;
+  return { ...extractSocialLinks(text) };
 }
 
 function platformFromSocial(social: Record<string, string>): AutoCompetitorCandidate['platform'] {
@@ -86,6 +71,7 @@ async function loadBrandContext(tenantId: string, websiteOverride?: string) {
   let productName = (brand.productName || '').trim();
   let industry = (brand.industry || '').trim();
   let audience = (brand.targetAudience || '').trim();
+  let tagline = (brand.productTagline || '').trim();
   let scrapedPages = 0;
 
   if (!websiteUrl && !companyName) {
@@ -93,7 +79,8 @@ async function loadBrandContext(tenantId: string, websiteOverride?: string) {
   }
 
   // Scrape website when we have a URL and thin brand context
-  if (websiteUrl && (!industry || !companyName || !productName)) {
+  // Scrape when context is thin, or the website was never read (hand-typed fields may be stale/partial).
+  if (websiteUrl && (!industry || !companyName || !productName || !brand.websiteScrapedAt)) {
     try {
       const profile = await scrapeBrandWebsite(tenantId, websiteUrl);
       scrapedPages = profile.pagesScraped;
@@ -101,6 +88,7 @@ async function loadBrandContext(tenantId: string, websiteOverride?: string) {
       productName = productName || profile.productName || '';
       industry = industry || profile.industry || '';
       audience = audience || profile.targetAudience || '';
+      tagline = tagline || profile.productTagline || '';
       // Persist light fills so future autos are faster
       await prisma.brandSettings.update({
         where: { tenantId },
@@ -134,6 +122,7 @@ async function loadBrandContext(tenantId: string, websiteOverride?: string) {
     productName,
     industry: industry || 'B2B technology',
     audience,
+    tagline,
     scrapedPages,
   };
 }
@@ -217,6 +206,7 @@ Rules:
 - Never include ${brand.companyName} itself.`,
     userPrompt: `Brand: ${brand.companyName}
 Product: ${brand.productName || 'n/a'}
+Tagline: ${brand.tagline || 'n/a'}
 Industry: ${brand.industry}
 Website: ${brand.websiteUrl || 'n/a'}
 Audience: ${brand.audience || 'n/a'}
@@ -258,6 +248,68 @@ ${JSON.stringify(socialPool)}`,
     });
   }
 
+  // ── Verify every candidate against real pages before saving anything ──────────
+  // The model can name look-alike companies or guess profile URLs. Keep a candidate only when
+  // its name shows up in the research, and trust social links found on its own website first.
+  const researchText = searchBlocks.join('\n').toLowerCase();
+  const brandHost = (() => {
+    try {
+      return new URL(brand.websiteUrl.includes('://') ? brand.websiteUrl : `https://${brand.websiteUrl}`).hostname.replace(/^www\./, '');
+    } catch {
+      return '';
+    }
+  })();
+  const verified: AutoCompetitorCandidate[] = [];
+  for (const c of candidates) {
+    const nameKey = c.name.toLowerCase();
+    const firstWord = nameKey.split(/\s+/)[0] || nameKey;
+    const inResearch = researchText.includes(nameKey) || (firstWord.length >= 5 && researchText.includes(firstWord));
+
+    let siteOk = false;
+    if (c.socialUrls.website) {
+      const host = (() => {
+        try {
+          return new URL(c.socialUrls.website).hostname.replace(/^www\./, '');
+        } catch {
+          return '';
+        }
+      })();
+      if (brandHost && host === brandHost) {
+        warnings.push(`Skipped ${c.name}: that is your own website.`);
+        continue;
+      }
+      const page = await fetchPage(c.socialUrls.website, 4000).catch(() => null);
+      if (page) {
+        siteOk = true;
+        // Social links published on the competitor's own site beat anything the model typed.
+        const official = extractSocialUrlsFromText(page.html);
+        for (const [k, v] of Object.entries(official)) c.socialUrls[k] = v;
+      } else {
+        delete c.socialUrls.website; // unreachable → do not store an unverified URL
+        c.website = undefined;
+      }
+    }
+
+    if (!inResearch && !siteOk) {
+      warnings.push(`Dropped ${c.name}: could not confirm it from the research or its website.`);
+      continue;
+    }
+
+    // Remaining (model-supplied) social URLs must be supported by research text or match the name.
+    for (const k of ['instagram', 'linkedin', 'facebook', 'twitter'] as const) {
+      const url = c.socialUrls[k];
+      if (!url) continue;
+      const slug = url.replace(/[?#].*$/, '').split('/').filter(Boolean).pop() || '';
+      if (!researchText.includes(url.toLowerCase().replace(/^https?:\/\/(www\.)?/, '')) && !slugMatchesName(slug, c.name)) {
+        delete c.socialUrls[k];
+      }
+    }
+    c.platform = platformFromSocial(c.socialUrls);
+    verified.push(c);
+  }
+  candidates.length = 0;
+  candidates.push(...verified);
+
   // Enrich missing socials with a targeted search per competitor (cap to avoid rate limits)
   for (const c of candidates.slice(0, limit)) {
     const hasSocial = ['instagram', 'linkedin', 'facebook', 'twitter'].some((k) => c.socialUrls[k]);
@@ -267,8 +319,13 @@ ${JSON.stringify(socialPool)}`,
         `"${c.name}" (instagram.com OR linkedin.com/company OR facebook.com OR x.com OR twitter.com)`,
         { maxResults: 5, days: 365 },
       );
+      // Take only handles that look like this company — the first Instagram link in a result
+      // list usually belongs to someone else.
       const found = extractSocialUrlsFromText(packSearch(results));
-      Object.assign(c.socialUrls, found);
+      for (const [k, v] of Object.entries(found)) {
+        const slug = v.replace(/[?#].*$/, '').split('/').filter(Boolean).pop() || '';
+        if (slugMatchesName(slug, c.name)) c.socialUrls[k] = v;
+      }
       if (!c.platform || c.platform === 'instagram') c.platform = platformFromSocial(c.socialUrls);
     } catch {
       // ignore enrichment failures
@@ -374,15 +431,20 @@ export async function autoDiscoverTopics(
   const llm = await LLMService.forTenant(tenantId);
 
   let research = '';
-  try {
-    const results = await search.search(
-      `${brand.industry} ${brand.productName || brand.companyName} trending topics keywords content marketing`,
-      { maxResults: 8, days: 60 },
-    );
-    research = packSearch(results);
-  } catch (err) {
-    warnings.push(`Trend research search failed: ${err instanceof Error ? err.message : 'error'}`);
+  const researchQueries = [
+    `${brand.industry} ${brand.productName || brand.companyName} industry news`,
+    `${brand.industry} market trends ${brand.audience ? `for ${brand.audience.slice(0, 80)}` : ''}`.trim(),
+  ];
+  const researchBlocks: string[] = [];
+  for (const q of researchQueries) {
+    try {
+      const results = await search.search(q, { maxResults: 6, days: 60 });
+      if (results.length) researchBlocks.push(packSearch(results));
+    } catch (err) {
+      warnings.push(`Trend research search failed: ${err instanceof Error ? err.message : 'error'}`);
+    }
   }
+  research = researchBlocks.join('\n\n');
 
   const json = await llm.generateRawJson({
     job: 'caption',
@@ -397,9 +459,12 @@ Rules:
 - Topics should help find industry news & social trends relevant to this brand.
 - Prefer specific, searchable phrases over vague ones.
 - Max ${limit} topics.
-- Do not include the company name as a topic unless it is a market category.`,
+- Do not include the company name as a topic unless it is a market category.
+- Stay inside this brand's real industry and audience as described; do not drift into adjacent sectors.
+- searchKeywords must be 2-5 concrete phrases a news search would match (no hashtags, no full sentences).`,
     userPrompt: `Brand: ${brand.companyName}
 Product: ${brand.productName || 'n/a'}
+Tagline: ${brand.tagline || 'n/a'}
 Industry: ${brand.industry}
 Website: ${brand.websiteUrl || 'n/a'}
 Audience: ${brand.audience || 'n/a'}
@@ -427,6 +492,28 @@ ${research.slice(0, 10000) || '(none — invent strong industry keywords from br
   if (!candidates.length) {
     throw new Error('No topics suggested. Check Integrations (LLM) and try again.');
   }
+
+  // A topic that returns no recent articles will fail every Trends run, so test each one now.
+  const checked = await Promise.all(
+    candidates.map(async (t) => {
+      try {
+        const hits = await search.search(t.searchKeywords, { maxResults: 3, days: 30 });
+        return { t, ok: hits.length > 0 };
+      } catch {
+        return { t, ok: true }; // search outage: do not punish the topic
+      }
+    }),
+  );
+  const unproductive = checked.filter((c) => !c.ok).map((c) => c.t.name);
+  if (unproductive.length) {
+    warnings.push(`Dropped ${unproductive.length} topic(s) with no news in the last 30 days: ${unproductive.join(', ')}`);
+  }
+  const usable = checked.filter((c) => c.ok).map((c) => c.t);
+  if (!usable.length) {
+    throw new Error('None of the suggested topics returned recent news. Try again, or add topics manually in Settings → Topics.');
+  }
+  candidates.length = 0;
+  candidates.push(...usable);
 
   const existing = await prisma.topic.findMany({
     where: { tenantId, deletedAt: null },

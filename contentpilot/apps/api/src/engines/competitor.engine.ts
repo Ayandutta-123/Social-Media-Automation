@@ -19,6 +19,7 @@ import {
 import { preferOriginalLogoUrl } from '../lib/store-upload';
 import { toPublicMediaUrl } from '../lib/public-media-url';
 import { resolveProviders } from '../services/providers.service';
+import { enforceGrounding } from '../services/grounded-post.service';
 import {
   applyExactImageToSlots,
   pictureLayersForFill,
@@ -228,13 +229,20 @@ ${scrapedPost.content || '(image/video post with little caption)'}${imgs}${comme
       ? `\n- Image: the published visual will reuse the competitor's EXACT scraped photo. STILL write a FULL detailed imagePrompt for OUR brand topic (photoreal scene matching the headline/body) so Approvals can regenerate AI art later — do NOT write "Reference photo" or "metadata only".`
       : `\n- Image prompt: write a LONG, highly detailed photorealistic brief matching our brand style (${brandSettings?.imageStyle || 'professional B2B'}). Never ask for icons, logos, flat badges, red circles, clipart, or line drawings.`;
 
-    const post = await llm.generatePost({
-      systemPrompt: buildSystemPrompt(brandSettings ?? {
-        brandVoice: '', imageStyle: '', hashtagStrategy: '', contentGuidelines: '', targetAudience: '',
-      }),
+    const systemPrompt = buildSystemPrompt(brandSettings ?? {
+      brandVoice: '', imageStyle: '', hashtagStrategy: '', contentGuidelines: '', targetAudience: '',
+    });
+    const draft = await llm.generatePost({
+      systemPrompt,
       userPrompt: `Create a social post inspired by this REAL competitor post. Match the CONTENT TYPE (announcement, offer, tip, carousel vibe, CTA style, hashtag density) but rewrite everything in OUR brand voice, audience, and visual style. Do NOT name the competitor. Do NOT copy their wording verbatim.
 
 ${sourceMaterial}
+
+ACCURACY RULES (most important):
+- The competitor post is only a model for FORMAT, angle and tone. Every fact in OUR post must come from OUR brand profile in the system prompt.
+- Never reuse the competitor's prices, discounts, percentages, dates, customer names, product features, awards or claims as if they were ours.
+- If the competitor announces something specific (a launch, an offer), write about OUR own capability or point of view instead — without inventing numbers, customers, features or dates.
+- If our brand profile does not give a specific fact, keep the wording general rather than guessing.
 
 Requirements:
 - Similar post type / angle / structure (e.g. if they ran a launch teaser, we do our own launch-style teaser)
@@ -247,6 +255,40 @@ ${
     : ''
 }`,
     });
+
+    // Fact check: our post may only use figures from our own brand profile, and must not echo the competitor.
+    const grounding = await enforceGrounding({
+      llm,
+      systemPrompt,
+      post: draft,
+      sources: [
+        [
+          brandSettings?.companyName,
+          brandSettings?.productName,
+          brandSettings?.productTagline,
+          brandSettings?.industry,
+          brandSettings?.targetAudience,
+          brandSettings?.contentGuidelines,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      ],
+      sourceLabel: 'brand profile',
+      forbidVerbatimFrom: scrapedPost.content || '',
+    });
+    const post = grounding.post;
+    const needsHumanReview = grounding.ungrounded.length > 0;
+    if (grounding.initiallyUngrounded.length) {
+      await executionLogService.log({
+        tenantId,
+        contentId,
+        workflowStep: 'competitor:fact_check',
+        engine: ContentEngine.COMPETITOR,
+        message: needsHumanReview
+          ? `Unverified content remains after revision (${grounding.ungrounded.join(', ')}) — forcing manual approval`
+          : `Fixed on revision: ${grounding.initiallyUngrounded.join(', ')}`,
+      });
+    }
 
     let slots: Record<string, string> = {
       headline: post.headline,
@@ -543,7 +585,8 @@ ${
     const { applyGenerationOutcome } = await import('../services/generation-outcome.service');
     const outcome = await applyGenerationOutcome(tenantId, contentId, {
       platforms: opts.platforms,
-      requireApproval: opts.requireApproval,
+      // Never auto-publish a post whose claims could not be verified against our brand profile.
+      requireApproval: needsHumanReview ? true : opts.requireApproval,
     });
 
     await executionLogService.log({
@@ -553,7 +596,12 @@ ${
       engine: ContentEngine.COMPETITOR,
       status: ExecutionStatus.SUCCESS,
       durationMs: Date.now() - start,
-      message: outcome === 'publishing' ? 'Auto-publishing' : 'Ready for approval',
+      message:
+        outcome === 'publishing'
+          ? 'Auto-publishing'
+          : needsHumanReview
+            ? 'Ready for approval — unverified claims flagged'
+            : 'Ready for approval',
     });
   }
 }

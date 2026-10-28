@@ -27,6 +27,17 @@ function usernameFromUrl(platform: string, profileUrl?: string, fallback = ''): 
   }
 }
 
+/** Coerce an actor's count field ("1.2K", 3, "12", [..]) to a safe non-negative integer. */
+function toCount(v: unknown): number {
+  if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? Math.round(v) : 0;
+  if (typeof v !== 'string') return 0;
+  const m = /^([\d.,]+)\s*([kKmM])?/.exec(v.trim());
+  if (!m) return 0;
+  const n = Number(m[1].replace(/,/g, ''));
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * (m[2] ? (m[2].toLowerCase() === 'k' ? 1e3 : 1e6) : 1));
+}
+
 function apifyAuthHeaders(token: string): Record<string, string> {
   const clean = sanitizeApiSecret(token);
   if (!clean) {
@@ -134,7 +145,11 @@ export class ApifyScrapingProvider implements ScrapingProvider {
 
     const items = (await datasetResponse.json()) as Record<string, unknown>[];
     const label = usernameFromUrl(platform, profileUrl, handle);
-    return items.slice(0, 10).map((item) => this.normalizePost(platform, label, item));
+    return items
+      .map((item) => this.normalizePost(platform, label, item))
+      // Drop dataset rows that are not posts (e.g. a LinkedIn profile card): no text, link or media.
+      .filter((p) => p.content.trim() || p.postUrl || (p.imageUrls?.length ?? 0) > 0)
+      .slice(0, 10);
   }
 
   /**
@@ -230,9 +245,10 @@ export class ApifyScrapingProvider implements ScrapingProvider {
       imageUrls,
       comments,
       engagement: {
-        likes: Number(item.likesCount ?? item.likes ?? item.favoriteCount ?? 0),
-        comments: Number(item.commentsCount ?? item.comments ?? item.replyCount ?? comments.length),
-        shares: Number(item.sharesCount ?? item.shares ?? item.retweetCount ?? 0),
+        likes: toCount(item.likesCount ?? item.likes ?? item.favoriteCount),
+        // `comments` is an array on some actors and a number on others.
+        comments: toCount(item.commentsCount ?? item.replyCount) || (Array.isArray(item.comments) ? item.comments.length : toCount(item.comments)) || comments.length,
+        shares: toCount(item.sharesCount ?? item.shares ?? item.retweetCount),
       },
     };
   }

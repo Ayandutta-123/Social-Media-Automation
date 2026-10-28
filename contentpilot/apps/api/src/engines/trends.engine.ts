@@ -14,6 +14,48 @@ import {
   type BrandCanvas,
 } from '../providers/templates/brand-renderer';
 import { preferOriginalLogoUrl } from '../lib/store-upload';
+import { fetchPage } from '../lib/source-grounding';
+import { enforceGrounding } from '../services/grounded-post.service';
+
+const MAX_ARTICLE_AGE_DAYS = 14;
+const USED_LOOKBACK_DAYS = 90;
+
+/** Same article, different tracking params / trailing slash / host prefix. */
+function normalizeSourceUrl(raw: string): string {
+  try {
+    const u = new URL(raw.trim());
+    u.hash = '';
+    for (const k of [...u.searchParams.keys()]) {
+      if (/^(utm_|fbclid|gclid|ref$|source$)/i.test(k)) u.searchParams.delete(k);
+    }
+    return `${u.hostname.replace(/^www\./, '')}${u.pathname.replace(/\/+$/, '')}${u.search}`.toLowerCase();
+  } catch {
+    return raw.trim().toLowerCase();
+  }
+}
+
+async function recentlyUsedSourceUrls(tenantId: string): Promise<Set<string>> {
+  const since = new Date(Date.now() - USED_LOOKBACK_DAYS * 86_400_000);
+  const rows = await prisma.generatedContent.findMany({
+    where: { tenantId, deletedAt: null, createdAt: { gte: since }, sourceReference: { not: null } },
+    select: { sourceReference: true },
+    take: 500,
+  });
+  const used = new Set<string>();
+  for (const r of rows) {
+    for (const part of String(r.sourceReference).split(/\s+/)) {
+      if (/^https?:\/\//i.test(part)) used.add(normalizeSourceUrl(part));
+    }
+  }
+  return used;
+}
+
+function isFreshEnough(publishedDate?: string): boolean {
+  if (!publishedDate) return true; // unknown date: let it through, the article page is checked later
+  const t = new Date(publishedDate).getTime();
+  if (Number.isNaN(t)) return true;
+  return Date.now() - t <= MAX_ARTICLE_AGE_DAYS * 86_400_000;
+}
 
 export type TrendsGenerateOpts = {
   topicId?: string;
@@ -65,7 +107,27 @@ export class TrendsEngine {
         message: `Searching via ${providers.searchProvider} (last 7 days): ${query}`,
       });
 
-      results = await search.search(query, { maxResults: 5, days: 7 });
+      const found = await search.search(query, { maxResults: 10, days: 7 });
+      const used = await recentlyUsedSourceUrls(tenantId);
+      const fresh = found.filter(
+        (r) => r.url && r.title && isFreshEnough(r.publishedDate) && !used.has(normalizeSourceUrl(r.url)),
+      );
+      const skipped = found.length - fresh.length;
+      if (skipped > 0) {
+        await executionLogService.log({
+          tenantId,
+          contentId,
+          workflowStep: 'trends:filter_sources',
+          engine: ContentEngine.TRENDS,
+          message: `Skipped ${skipped} of ${found.length} result(s): already used in the last ${USED_LOOKBACK_DAYS} days or older than ${MAX_ARTICLE_AGE_DAYS} days`,
+        });
+      }
+      if (found.length > 0 && fresh.length === 0) {
+        throw new Error(
+          `Every recent article for "${topic.name}" was already posted or is stale. Add more keywords to this topic or try again later.`,
+        );
+      }
+      results = fresh.slice(0, 5);
     } else {
       await executionLogService.log({
         tenantId,
@@ -99,10 +161,25 @@ export class TrendsEngine {
       }`,
     });
 
+    // Read the actual article — a search snippet is a few truncated lines and invites guessing.
+    const page = await fetchPage(primary.url, 6000).catch(() => null);
+    const articleText = page && page.text.length >= 500 ? page.text : '';
+    const publishedDate = primary.publishedDate || page?.publishedAt || undefined;
+    const outlet = page?.siteName || '';
+    await executionLogService.log({
+      tenantId,
+      contentId,
+      workflowStep: 'trends:read_article',
+      engine: ContentEngine.TRENDS,
+      message: articleText
+        ? `Read ${articleText.length} chars of article text${outlet ? ` from ${outlet}` : ''}`
+        : 'Article page not readable — writing from title + search snippet only (conservative mode)',
+    });
+
     const sourceMaterial = [
       `[PRIMARY ARTICLE — write the post ABOUT THIS exact story]\nTitle: ${primary.title}\n${primary.snippet}\nSource: ${primary.url}${
-        primary.publishedDate ? `\nPublished: ${primary.publishedDate}` : ''
-      }`,
+        publishedDate ? `\nPublished: ${publishedDate}` : ''
+      }${outlet ? `\nOutlet: ${outlet}` : ''}${articleText ? `\n\nARTICLE TEXT:\n${articleText}` : ''}`,
       ...supporting.map(
         (r, i) =>
           `[Supporting ${i + 1}]\nTitle: ${r.title}\n${r.snippet}\nSource: ${r.url}`,
@@ -136,7 +213,7 @@ export class TrendsEngine {
           .map((l) => l.slot || l.id)
       : [];
 
-    const post = await llm.generatePost({
+    const draft = await llm.generatePost({
       systemPrompt: buildSystemPrompt(brandSettings ?? {
         brandVoice: '', imageStyle: '', hashtagStrategy: '', contentGuidelines: '', targetAudience: '',
       }),
@@ -152,9 +229,13 @@ Topic label from settings (context only, not a substitute for the article): "${t
 ${supporting.length ? `Optional supporting context (do not switch the story away from PRIMARY):\n${supporting
   .map((r) => `- ${r.title} (${r.url})`)
   .join('\n')}\n` : ''}
+${articleText ? `ARTICLE TEXT (authoritative — the only place facts may come from):\n${articleText}\n` : 'Only the title and snippet above are available — stay general and do not add specifics.\n'}
 Rules:
 - Caption + hashtags must clearly be about the PRIMARY article facts (who/what/where), not a generic "${topic.name}" fluff post.
-- Do NOT fabricate quotes, numbers, or claims that are not in the PRIMARY snippet/title.
+- Every figure, date, name and claim must appear in the PRIMARY article text/snippet. If a detail is not there, leave it out.
+- Do NOT fabricate quotes, numbers, rankings or claims. Do NOT attribute statements to people or companies unless the article does.
+- Do NOT present the news as our company's own achievement; at most connect it to our brand's perspective without inventing facts about us.
+- State who published it when you cite a stat (e.g. "according to ${outlet || 'the report'}").
 - imagePrompt must describe a photo matching the PRIMARY story scene (people/places/industry of THAT article).
 - Include sourceAttribution with the PRIMARY URL.
 ${
@@ -167,6 +248,44 @@ ${
     : ''
 }`,
     });
+
+    const systemPrompt = buildSystemPrompt(brandSettings ?? {
+      brandVoice: '', imageStyle: '', hashtagStrategy: '', contentGuidelines: '', targetAudience: '',
+    });
+    const grounding = await enforceGrounding({
+      llm,
+      systemPrompt,
+      post: draft,
+      sources: [
+        primary.title,
+        primary.snippet,
+        articleText,
+        ...supporting.map((r) => `${r.title}\n${r.snippet}`),
+        // Figures about our own brand are allowed when they come from the brand profile.
+        [
+          brandSettings?.companyName,
+          brandSettings?.productName,
+          brandSettings?.productTagline,
+          brandSettings?.contentGuidelines,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      ],
+      sourceLabel: 'source article',
+    });
+    const post = grounding.post;
+    const needsHumanReview = grounding.ungrounded.length > 0;
+    if (grounding.initiallyUngrounded.length) {
+      await executionLogService.log({
+        tenantId,
+        contentId,
+        workflowStep: 'trends:fact_check',
+        engine: ContentEngine.TRENDS,
+        message: needsHumanReview
+          ? `Unsupported figures remain after revision (${grounding.ungrounded.join(', ')}) — forcing manual approval`
+          : `Removed unsupported figures: ${grounding.initiallyUngrounded.join(', ')}`,
+      });
+    }
 
     let slots: Record<string, string> = {};
     if (post.headline) {
@@ -366,7 +485,8 @@ ${
     const { applyGenerationOutcome } = await import('../services/generation-outcome.service');
     const outcome = await applyGenerationOutcome(tenantId, contentId, {
       platforms: opts.platforms,
-      requireApproval: opts.requireApproval,
+      // Never auto-publish a post whose figures could not be verified against the article.
+      requireApproval: needsHumanReview ? true : opts.requireApproval,
     });
 
     await executionLogService.log({
@@ -376,7 +496,12 @@ ${
       engine: ContentEngine.TRENDS,
       status: ExecutionStatus.SUCCESS,
       durationMs: Date.now() - start,
-      message: outcome === 'publishing' ? 'Auto-publishing' : 'Ready for approval',
+      message:
+        outcome === 'publishing'
+          ? 'Auto-publishing'
+          : needsHumanReview
+            ? 'Ready for approval — unverified figures flagged'
+            : 'Ready for approval',
     });
   }
 }
