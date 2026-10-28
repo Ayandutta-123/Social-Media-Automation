@@ -12,6 +12,7 @@ import {
   ArrowDownToLine,
   ArrowUp,
   ArrowUpToLine,
+  Bold,
   Circle,
   Copy,
   Eye,
@@ -25,9 +26,12 @@ import {
   Minimize2,
   Redo2,
   Save,
+  Scan,
   Square,
+  Strikethrough,
   Trash2,
   Type,
+  Underline,
   Undo2,
   Unlock,
 } from 'lucide-react';
@@ -42,6 +46,9 @@ import {
 } from 'react';
 import { apiUpload } from '@/lib/api';
 import { InlineNotice, ProcessingButton, Spinner } from '@/components/ui';
+import { Tip } from '@/components/tooltip';
+import { FontPicker } from '@/components/font-picker';
+import { FONT_CATALOG, FONT_WEIGHTS, googleFontsHref } from '@/lib/editor-fonts';
 
 export type EditorFillType =
   | 'headline'
@@ -85,6 +92,7 @@ export type EditorLayer = {
   fontWeight?: string;
   fontFamily?: string;
   fontStyle?: 'normal' | 'italic';
+  textDecoration?: 'none' | 'underline' | 'line-through';
   color?: string;
   align?: 'left' | 'center' | 'right';
   valign?: 'top' | 'middle' | 'bottom';
@@ -160,19 +168,7 @@ const FILL_TYPES: Array<{ id: EditorFillType; label: string; for: Array<'text' |
   { id: 'image_url', label: 'Image URL', for: ['image'] },
 ];
 
-const FONT_STACKS: Array<{ id: string; label: string }> = [
-  { id: 'system-ui,Segoe UI,sans-serif', label: 'Inter / System' },
-  { id: 'Helvetica Neue,Helvetica,Arial,sans-serif', label: 'Helvetica / Arial' },
-  { id: 'Verdana,Geneva,sans-serif', label: 'Verdana' },
-  { id: 'Trebuchet MS,sans-serif', label: 'Trebuchet' },
-  { id: 'Impact,Haettenschweiler,sans-serif', label: 'Impact (poster)' },
-  { id: 'Georgia,serif', label: 'Georgia (serif)' },
-  { id: 'Times New Roman,Times,serif', label: 'Times (serif)' },
-  { id: 'Palatino,Palatino Linotype,serif', label: 'Palatino (serif)' },
-  { id: 'Courier New,Courier,monospace', label: 'Courier (mono)' },
-];
-
-const FONT_WEIGHTS = ['300', '400', '500', '600', '700', '800', '900'];
+const FONT_STACKS = FONT_CATALOG;
 
 const CANVAS_PRESETS: Array<{ id: string; label: string; width: number; height: number }> = [
   { id: 'ig_square', label: 'Instagram square 1080×1080', width: 1080, height: 1080 },
@@ -201,7 +197,8 @@ function cloneCanvas(canvas: EditorCanvas): EditorCanvas {
 }
 
 function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+  // A layer larger than the canvas has max < min; pin it to min instead of going negative.
+  return Math.min(Math.max(min, max), Math.max(min, value));
 }
 
 function uniqueId(prefix: string, layers: EditorLayer[]): string {
@@ -395,27 +392,34 @@ function InspectorSection({
 function IconToggle({
   active,
   title,
+  shortcut,
+  disabled,
   onClick,
   children,
 }: {
   active?: boolean;
+  /** Tooltip + accessible name: say what the button does. */
   title: string;
+  shortcut?: string;
+  disabled?: boolean;
   onClick: () => void;
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      aria-pressed={active}
-      onClick={onClick}
-      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg p-1.5 hover:bg-[hsl(var(--muted))] sm:h-8 sm:w-8 sm:rounded ${
-        active ? 'bg-brand-500/10 text-brand-700 dark:text-brand-300' : ''
-      }`}
-    >
-      {children}
-    </button>
+    <Tip label={title} shortcut={shortcut}>
+      <button
+        type="button"
+        aria-label={title}
+        aria-pressed={active}
+        disabled={disabled}
+        onClick={onClick}
+        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg p-1.5 transition-colors hover:bg-[hsl(var(--muted))] disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent sm:h-8 sm:w-8 sm:rounded ${
+          active ? 'bg-brand-500/10 text-brand-700 dark:text-brand-300' : ''
+        }`}
+      >
+        {children}
+      </button>
+    </Tip>
   );
 }
 
@@ -475,10 +479,23 @@ export function InhouseTemplateEditor({
   const dragRafRef = useRef<number | null>(null);
   const pendingDragPatchRef = useRef<{ id: string; patch: Partial<EditorLayer> } | null>(null);
 
+  // Load the web fonts used for the live preview (the server renders with its installed copies).
+  useEffect(() => {
+    const id = 'cp-editor-google-fonts';
+    if (document.getElementById(id)) return;
+    const link = document.createElement('link');
+    link.id = id;
+    link.rel = 'stylesheet';
+    link.href = googleFontsHref();
+    document.head.appendChild(link);
+  }, []);
+
   const selected = useMemo(
     () => layers.find((layer) => layer.id === selectedId) || null,
     [layers, selectedId],
   );
+
+  const hasSelection = Boolean(selected) && !selected?.locked;
 
   useEffect(() => {
     if (selectedId && layers.some((layer) => layer.id === selectedId)) return;
@@ -834,8 +851,11 @@ export function InhouseTemplateEditor({
       operationSnapshotRef.current = null;
       return;
     }
-    setHistory((items) => [...items.slice(-49), operationSnapshotRef.current!]);
-    setFuture([]);
+    // A plain click (select without moving) must not create an undo step.
+    if (JSON.stringify(operationSnapshotRef.current) !== JSON.stringify(canvasRef.current)) {
+      setHistory((items) => [...items.slice(-49), operationSnapshotRef.current!]);
+      setFuture([]);
+    }
     operationRef.current = null;
     operationSnapshotRef.current = null;
   };
@@ -897,6 +917,23 @@ export function InhouseTemplateEditor({
         if (copy.slot) copy.slot = id;
         commitRef.current({ ...current, layers: [...currentLayers, copy] });
         setSelectedId(id);
+        return;
+      }
+      if (modifier && selectedLayer?.type === 'text' && ['b', 'i', 'u'].includes(event.key.toLowerCase())) {
+        event.preventDefault();
+        const key = event.key.toLowerCase();
+        if (key === 'b') {
+          const heavy = Number(selectedLayer.fontWeight || '600') >= 700;
+          patchLayerRef.current(selectedLayer.id, { fontWeight: heavy ? '400' : '700' });
+        } else if (key === 'i') {
+          patchLayerRef.current(selectedLayer.id, {
+            fontStyle: selectedLayer.fontStyle === 'italic' ? 'normal' : 'italic',
+          });
+        } else {
+          patchLayerRef.current(selectedLayer.id, {
+            textDecoration: selectedLayer.textDecoration === 'underline' ? 'none' : 'underline',
+          });
+        }
         return;
       }
       if (modifier && event.key.toLowerCase() === 'c' && selectedLayer) {
@@ -990,91 +1027,124 @@ export function InhouseTemplateEditor({
               </option>
             ))}
           </select>
-          <ProcessingButton
-            className="!min-h-[44px] !px-3 text-xs sm:min-h-[44px] md:!min-h-[36px]"
-            loading={saving}
-            loadingText="Saving design…"
-            icon={<Save size={13} />}
-            onClick={() => void requestSave()}
-          >
-            Save design
-          </ProcessingButton>
-          <button
-            type="button"
-            className="btn-secondary !min-h-[44px] !px-3 text-xs sm:min-h-[44px] md:!min-h-[36px]"
-            onClick={() => setFullscreen((value) => !value)}
-          >
-            {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-            {fullscreen ? 'Exit' : 'Fullscreen'}
-          </button>
+          <Tip label="Save this layout" shortcut="⌘/Ctrl+S">
+            <ProcessingButton
+              className="!min-h-[44px] !px-3 text-xs sm:min-h-[44px] md:!min-h-[36px]"
+              loading={saving}
+              loadingText="Saving design…"
+              icon={<Save size={13} />}
+              onClick={() => void requestSave()}
+            >
+              Save design
+            </ProcessingButton>
+          </Tip>
+          <Tip label={fullscreen ? 'Leave fullscreen' : 'Edit in fullscreen'} shortcut={fullscreen ? 'Esc' : undefined}>
+            <button
+              type="button"
+              className="btn-secondary !min-h-[44px] !px-3 text-xs sm:min-h-[44px] md:!min-h-[36px]"
+              onClick={() => setFullscreen((value) => !value)}
+            >
+              {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+              {fullscreen ? 'Exit' : 'Fullscreen'}
+            </button>
+          </Tip>
         </div>
       </div>
       {editorError && <InlineNotice kind="error">{editorError}</InlineNotice>}
 
       <div className="rounded-xl border border-[hsl(var(--border))] overflow-hidden">
         <div className="flex items-center gap-1 overflow-x-auto border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 p-2 scrollbar-none">
-          <button type="button" className="btn-secondary shrink-0 !min-h-[44px] !px-2 text-[11px] sm:!min-h-[32px]" onClick={() => addLayer('text')}>
-            <Type size={13} className="inline mr-1" /> Text
-          </button>
-          <button type="button" className="btn-secondary shrink-0 !min-h-[44px] !px-2 text-[11px] sm:!min-h-[32px]" onClick={() => addLayer('image')}>
-            <ImageIcon size={13} className="inline mr-1" /> Image
-          </button>
-          <button type="button" className="btn-secondary shrink-0 !min-h-[44px] !px-2 text-[11px] sm:!min-h-[32px]" onClick={() => addLayer('rect')}>
-            <Square size={13} className="inline mr-1" /> Box
-          </button>
-          <button type="button" className="btn-secondary shrink-0 !min-h-[44px] !px-2 text-[11px] sm:!min-h-[32px]" onClick={() => addLayer('ellipse')}>
-            <Circle size={13} className="inline mr-1" /> Circle
-          </button>
+          {([
+            ['text', Type, 'Text', 'Add a text zone to the canvas'],
+            ['image', ImageIcon, 'Image', 'Add an image zone (photo, logo or AI picture)'],
+            ['rect', Square, 'Box', 'Add a rectangle / card shape'],
+            ['ellipse', Circle, 'Circle', 'Add a circle or oval shape'],
+          ] as const).map(([type, Icon, label, hint]) => (
+            <Tip key={type} label={hint}>
+              <button
+                type="button"
+                aria-label={hint}
+                className="btn-secondary shrink-0 !min-h-[44px] !px-2 text-[11px] sm:!min-h-[32px]"
+                onClick={() => addLayer(type)}
+              >
+                <Icon size={13} className="inline mr-1" /> {label}
+              </button>
+            </Tip>
+          ))}
 
           <span className="mx-1 h-5 w-px bg-[hsl(var(--border))]" />
-          <IconToggle title="Undo" onClick={undo}><Undo2 size={14} /></IconToggle>
-          <IconToggle title="Redo" onClick={redo}><Redo2 size={14} /></IconToggle>
+          <IconToggle title="Undo last change" shortcut="⌘/Ctrl+Z" disabled={!history.length} onClick={undo}>
+            <Undo2 size={14} />
+          </IconToggle>
+          <IconToggle title="Redo" shortcut="⌘/Ctrl+Shift+Z" disabled={!future.length} onClick={redo}>
+            <Redo2 size={14} />
+          </IconToggle>
 
           <span className="mx-1 h-5 w-px bg-[hsl(var(--border))]" />
-          <IconToggle title="Align left" onClick={() => alignToCanvas('left')}><AlignLeft size={14} /></IconToggle>
-          <IconToggle title="Center horizontally" onClick={() => alignToCanvas('hcenter')}>
+          <IconToggle title="Align to canvas left edge" disabled={!hasSelection} onClick={() => alignToCanvas('left')}>
+            <AlignLeft size={14} />
+          </IconToggle>
+          <IconToggle title="Center horizontally on canvas" disabled={!hasSelection} onClick={() => alignToCanvas('hcenter')}>
             <AlignHorizontalJustifyCenter size={14} />
           </IconToggle>
-          <IconToggle title="Align right" onClick={() => alignToCanvas('right')}><AlignRight size={14} /></IconToggle>
-          <IconToggle title="Align top" onClick={() => alignToCanvas('top')}><AlignStartHorizontal size={14} /></IconToggle>
-          <IconToggle title="Center vertically" onClick={() => alignToCanvas('vcenter')}>
+          <IconToggle title="Align to canvas right edge" disabled={!hasSelection} onClick={() => alignToCanvas('right')}>
+            <AlignRight size={14} />
+          </IconToggle>
+          <IconToggle title="Align to canvas top edge" disabled={!hasSelection} onClick={() => alignToCanvas('top')}>
+            <AlignStartHorizontal size={14} />
+          </IconToggle>
+          <IconToggle title="Center vertically on canvas" disabled={!hasSelection} onClick={() => alignToCanvas('vcenter')}>
             <AlignVerticalJustifyCenter size={14} />
           </IconToggle>
-          <IconToggle title="Align bottom" onClick={() => alignToCanvas('bottom')}><AlignEndHorizontal size={14} /></IconToggle>
+          <IconToggle title="Align to canvas bottom edge" disabled={!hasSelection} onClick={() => alignToCanvas('bottom')}>
+            <AlignEndHorizontal size={14} />
+          </IconToggle>
 
           <span className="mx-1 h-5 w-px bg-[hsl(var(--border))]" />
-          <IconToggle title="Bring to front" onClick={() => sendTo('front')}><ArrowUpToLine size={14} /></IconToggle>
-          <IconToggle title="Send to back" onClick={() => sendTo('back')}><ArrowDownToLine size={14} /></IconToggle>
+          <IconToggle title="Bring layer to front" disabled={!hasSelection} onClick={() => sendTo('front')}>
+            <ArrowUpToLine size={14} />
+          </IconToggle>
+          <IconToggle title="Send layer to back" disabled={!hasSelection} onClick={() => sendTo('back')}>
+            <ArrowDownToLine size={14} />
+          </IconToggle>
 
           <span className="mx-1 h-5 w-px bg-[hsl(var(--border))]" />
-          <IconToggle title="Snap to 10px grid" active={snapToGrid} onClick={() => setSnapToGrid((v) => !v)}>
+          <IconToggle title={snapToGrid ? 'Snap to 10px grid: on' : 'Snap to 10px grid: off'} active={snapToGrid} onClick={() => setSnapToGrid((v) => !v)}>
             <Magnet size={14} />
           </IconToggle>
-          <IconToggle title="Toggle grid" active={showGrid} onClick={() => setShowGrid((v) => !v)}>
+          <IconToggle title={showGrid ? 'Hide grid' : 'Show grid'} active={showGrid} onClick={() => setShowGrid((v) => !v)}>
             <Grid3X3 size={14} />
           </IconToggle>
-          <IconToggle title="Toggle safe area" active={showSafeArea} onClick={() => setShowSafeArea((v) => !v)}>
-            <Square size={14} />
+          <IconToggle
+            title={showSafeArea ? 'Hide safe-area guide (5% margin)' : 'Show safe-area guide (5% margin)'}
+            active={showSafeArea}
+            onClick={() => setShowSafeArea((v) => !v)}
+          >
+            <Scan size={14} />
           </IconToggle>
 
-          <select
-            aria-label="Canvas zoom"
-            className="ml-auto shrink-0 min-h-[44px] rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2 text-xs md:min-h-0 md:rounded md:px-1.5 md:py-1 md:text-[11px]"
-            value={zoom}
-            onChange={(event) => setZoom(event.target.value as typeof zoom)}
-          >
-            <option value="fit">Fit</option>
-            <option value="25">25%</option>
-            <option value="50">50%</option>
-            <option value="75">75%</option>
-            <option value="100">100%</option>
-            <option value="150">150%</option>
-          </select>
-          <label className="inline-flex min-h-[44px] shrink-0 cursor-pointer items-center whitespace-nowrap rounded-xl border border-dashed border-[hsl(var(--border))] px-3 py-2 text-xs hover:border-brand-500 md:min-h-0 md:rounded md:px-2 md:py-1.5 md:text-[11px]">
-            {uploading ? <Spinner size={12} className="inline mr-1" /> : <ImageIcon size={12} className="inline mr-1" />}
-            {uploading ? 'Uploading…' : canvasImage ? 'Replace plate' : 'Upload plate'}
-            <input type="file" accept="image/*" className="sr-only" disabled={uploading} onChange={onUploadBackground} />
-          </label>
+          <Tip label="Canvas zoom" className="ml-auto">
+            <select
+              aria-label="Canvas zoom"
+              className="shrink-0 min-h-[44px] rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2 text-xs md:min-h-0 md:rounded md:px-1.5 md:py-1 md:text-[11px]"
+              value={zoom}
+              onChange={(event) => setZoom(event.target.value as typeof zoom)}
+            >
+              <option value="fit">Fit</option>
+              <option value="25">25%</option>
+              <option value="50">50%</option>
+              <option value="75">75%</option>
+              <option value="100">100%</option>
+              <option value="150">150%</option>
+            </select>
+          </Tip>
+          <Tip label={canvasImage ? 'Replace the background plate image' : 'Upload a background plate (your finished design)'}>
+            <label className="inline-flex min-h-[44px] shrink-0 cursor-pointer items-center whitespace-nowrap rounded-xl border border-dashed border-[hsl(var(--border))] px-3 py-2 text-xs hover:border-brand-500 md:min-h-0 md:rounded md:px-2 md:py-1.5 md:text-[11px]">
+              {uploading ? <Spinner size={12} className="inline mr-1" /> : <ImageIcon size={12} className="inline mr-1" />}
+              {uploading ? 'Uploading…' : canvasImage ? 'Replace plate' : 'Upload plate'}
+              <input type="file" accept="image/*" className="sr-only" disabled={uploading} onChange={onUploadBackground} />
+            </label>
+          </Tip>
         </div>
 
         <div
@@ -1119,26 +1189,30 @@ export function InhouseTemplateEditor({
                           className={`h-1.5 w-1.5 shrink-0 rounded-full ${
                             layer.fillMode === 'dynamic' ? 'bg-brand-500' : 'bg-slate-400'
                           }`}
-                          title={layer.fillMode === 'dynamic' ? 'Dynamic content' : 'Fixed content'}
+                          title={layer.fillMode === 'dynamic' ? 'Dynamic — AI fills this zone' : 'Fixed — stays as designed'}
                         />
                       )}
                     </button>
-                    <button
-                      type="button"
-                      title={layer.hidden ? 'Show layer' : 'Hide layer'}
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg hover:bg-[hsl(var(--muted))] sm:h-7 sm:w-7 sm:rounded sm:p-0.5"
-                      onClick={() => patchLayer(layer.id, { hidden: !layer.hidden })}
-                    >
-                      {layer.hidden ? <EyeOff size={14} /> : <Eye size={14} />}
-                    </button>
-                    <button
-                      type="button"
-                      title={layer.locked ? 'Unlock layer' : 'Lock layer'}
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg hover:bg-[hsl(var(--muted))] sm:h-7 sm:w-7 sm:rounded sm:p-0.5"
-                      onClick={() => patchLayer(layer.id, { locked: !layer.locked })}
-                    >
-                      {layer.locked ? <Lock size={14} /> : <Unlock size={14} />}
-                    </button>
+                    <Tip label={layer.hidden ? 'Show this layer' : 'Hide this layer'}>
+                      <button
+                        type="button"
+                        aria-label={layer.hidden ? 'Show this layer' : 'Hide this layer'}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg hover:bg-[hsl(var(--muted))] sm:h-7 sm:w-7 sm:rounded sm:p-0.5"
+                        onClick={() => patchLayer(layer.id, { hidden: !layer.hidden })}
+                      >
+                        {layer.hidden ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </Tip>
+                    <Tip label={layer.locked ? 'Unlock position (allow drag / resize)' : 'Lock position (prevent drag / resize)'}>
+                      <button
+                        type="button"
+                        aria-label={layer.locked ? 'Unlock layer position' : 'Lock layer position'}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg hover:bg-[hsl(var(--muted))] sm:h-7 sm:w-7 sm:rounded sm:p-0.5"
+                        onClick={() => patchLayer(layer.id, { locked: !layer.locked })}
+                      >
+                        {layer.locked ? <Lock size={14} /> : <Unlock size={14} />}
+                      </button>
+                    </Tip>
                   </div>
                 </li>
               ))}
@@ -1290,6 +1364,10 @@ export function InhouseTemplateEditor({
                           fontFamily: layer.fontFamily || 'system-ui',
                           fontWeight: layer.fontWeight || '600',
                           fontStyle: layer.fontStyle === 'italic' ? 'italic' : 'normal',
+                          textDecoration:
+                            layer.textDecoration === 'underline' || layer.textDecoration === 'line-through'
+                              ? layer.textDecoration
+                              : undefined,
                           lineHeight: layer.lineHeight || 1.25,
                           letterSpacing: layer.letterSpacing
                             ? `${(layer.letterSpacing / width) * 100}cqw`
@@ -1303,12 +1381,13 @@ export function InhouseTemplateEditor({
                           borderRadius: layer.highlightRadius
                             ? `${(layer.highlightRadius / width) * 100}cqw`
                             : undefined,
+                          // Server renderer defaults to top; keep the preview identical.
                           alignItems:
-                            layer.valign === 'top'
-                              ? 'flex-start'
+                            layer.valign === 'middle'
+                              ? 'center'
                               : layer.valign === 'bottom'
                                 ? 'flex-end'
-                                : 'center',
+                                : 'flex-start',
                           justifyContent:
                             layer.align === 'left'
                               ? 'flex-start'
@@ -1409,11 +1488,11 @@ export function InhouseTemplateEditor({
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center gap-1">
-                  <IconToggle title="Duplicate" onClick={duplicateSelected}><Copy size={13} /></IconToggle>
-                  <IconToggle title="Move layer up" onClick={() => reorder(1)}><ArrowUp size={13} /></IconToggle>
-                  <IconToggle title="Move layer down" onClick={() => reorder(-1)}><ArrowDown size={13} /></IconToggle>
+                  <IconToggle title="Duplicate layer" shortcut="⌘/Ctrl+D" onClick={duplicateSelected}><Copy size={13} /></IconToggle>
+                  <IconToggle title="Move layer one step forward" onClick={() => reorder(1)}><ArrowUp size={13} /></IconToggle>
+                  <IconToggle title="Move layer one step backward" onClick={() => reorder(-1)}><ArrowDown size={13} /></IconToggle>
                   <IconToggle
-                    title={selected.hidden ? 'Show' : 'Hide'}
+                    title={selected.hidden ? 'Show this layer' : 'Hide this layer'}
                     onClick={() => patchLayer(selected.id, { hidden: !selected.hidden })}
                   >
                     {selected.hidden ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -1425,14 +1504,16 @@ export function InhouseTemplateEditor({
                   >
                     {selected.locked ? <Lock size={13} /> : <Unlock size={13} />}
                   </IconToggle>
-                  <button
-                    type="button"
-                    title="Delete"
-                    className="ml-auto inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-red-300 p-2 text-red-500 md:min-h-0 md:min-w-0 md:rounded md:p-1.5"
-                    onClick={removeSelected}
-                  >
-                    <Trash2 size={13} />
-                  </button>
+                  <Tip label="Delete layer" shortcut="Del" className="ml-auto">
+                    <button
+                      type="button"
+                      aria-label="Delete layer"
+                      className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-red-300 p-2 text-red-500 hover:bg-red-500/10 md:min-h-0 md:min-w-0 md:rounded md:p-1.5"
+                      onClick={removeSelected}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </Tip>
                 </div>
                 {selected.locked && (
                   <button
@@ -1578,18 +1659,13 @@ export function InhouseTemplateEditor({
                           onChange={(event) => patchLayer(selected.id, { text: event.target.value }, false)}
                         />
                       </label>
-                      <label className="space-y-1 block">
+                      <div className="space-y-1">
                         <span className="text-[10px] font-medium text-[hsl(var(--muted-foreground))]">Font</span>
-                        <select
-                          className="input min-h-[44px] md:!min-h-[36px] text-xs"
-                          value={selected.fontFamily || FONT_STACKS[0].id}
-                          onChange={(event) => patchLayer(selected.id, { fontFamily: event.target.value })}
-                        >
-                          {FONT_STACKS.map((font) => (
-                            <option key={font.id} value={font.id}>{font.label}</option>
-                          ))}
-                        </select>
-                      </label>
+                        <FontPicker
+                          value={selected.fontFamily}
+                          onChange={(fontFamily) => patchLayer(selected.id, { fontFamily })}
+                        />
+                      </div>
                       <div className="grid grid-cols-2 gap-2">
                         <NumberField label="Font size" value={selected.fontSize || 36} min={8} max={400} onChange={(v) => patchLayer(selected.id, { fontSize: clamp(v, 8, 400) })} />
                         <label className="space-y-1">
@@ -1600,7 +1676,7 @@ export function InhouseTemplateEditor({
                             onChange={(event) => patchLayer(selected.id, { fontWeight: event.target.value })}
                           >
                             {FONT_WEIGHTS.map((weight) => (
-                              <option key={weight} value={weight}>{weight}</option>
+                              <option key={weight.value} value={weight.value}>{weight.value} · {weight.label}</option>
                             ))}
                           </select>
                         </label>
@@ -1622,26 +1698,40 @@ export function InhouseTemplateEditor({
                         </label>
                       </div>
 
-                      <div className="flex items-center gap-1">
-                        <div className="grid flex-1 grid-cols-3 overflow-hidden rounded-lg border border-[hsl(var(--border))]">
-                          {([['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight]] as const).map(
-                            ([align, Icon]) => (
-                              <button
-                                key={align}
-                                type="button"
-                                title={`Align ${align}`}
-                                className={`flex min-h-[44px] items-center justify-center py-2 md:min-h-0 ${
-                                  (selected.align || 'center') === align ? 'bg-brand-500/10 text-brand-700 dark:text-brand-300' : ''
-                                }`}
-                                onClick={() => patchLayer(selected.id, { align })}
-                              >
-                                <Icon size={13} />
-                              </button>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-[hsl(var(--border))]">
+                          {([['left', AlignLeft, 'Align text left'], ['center', AlignCenter, 'Center text'], ['right', AlignRight, 'Align text right']] as const).map(
+                            ([align, Icon, hint]) => (
+                              <Tip key={align} label={hint}>
+                                <button
+                                  type="button"
+                                  aria-label={hint}
+                                  className={`flex min-h-[44px] w-11 items-center justify-center py-2 md:min-h-0 md:w-9 ${
+                                    (selected.align || 'center') === align ? 'bg-brand-500/10 text-brand-700 dark:text-brand-300' : 'hover:bg-[hsl(var(--muted))]'
+                                  }`}
+                                  onClick={() => patchLayer(selected.id, { align })}
+                                >
+                                  <Icon size={13} />
+                                </button>
+                              </Tip>
                             ),
                           )}
                         </div>
                         <IconToggle
+                          title="Bold"
+                          shortcut="⌘/Ctrl+B"
+                          active={Number(selected.fontWeight || '600') >= 700}
+                          onClick={() =>
+                            patchLayer(selected.id, {
+                              fontWeight: Number(selected.fontWeight || '600') >= 700 ? '400' : '700',
+                            })
+                          }
+                        >
+                          <Bold size={13} />
+                        </IconToggle>
+                        <IconToggle
                           title="Italic"
+                          shortcut="⌘/Ctrl+I"
                           active={selected.fontStyle === 'italic'}
                           onClick={() =>
                             patchLayer(selected.id, {
@@ -1651,20 +1741,44 @@ export function InhouseTemplateEditor({
                         >
                           <Italic size={13} />
                         </IconToggle>
+                        <IconToggle
+                          title="Underline"
+                          shortcut="⌘/Ctrl+U"
+                          active={selected.textDecoration === 'underline'}
+                          onClick={() =>
+                            patchLayer(selected.id, {
+                              textDecoration: selected.textDecoration === 'underline' ? 'none' : 'underline',
+                            })
+                          }
+                        >
+                          <Underline size={13} />
+                        </IconToggle>
+                        <IconToggle
+                          title="Strikethrough"
+                          active={selected.textDecoration === 'line-through'}
+                          onClick={() =>
+                            patchLayer(selected.id, {
+                              textDecoration: selected.textDecoration === 'line-through' ? 'none' : 'line-through',
+                            })
+                          }
+                        >
+                          <Strikethrough size={13} />
+                        </IconToggle>
                       </div>
 
                       <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-[hsl(var(--border))] text-[10px]">
                         {(['top', 'middle', 'bottom'] as const).map((valign) => (
-                          <button
-                            key={valign}
-                            type="button"
-                            className={`min-h-[44px] py-2 capitalize md:min-h-0 ${
-                              (selected.valign || 'top') === valign ? 'bg-brand-500/10 text-brand-700 dark:text-brand-300' : ''
-                            }`}
-                            onClick={() => patchLayer(selected.id, { valign })}
-                          >
-                            {valign}
-                          </button>
+                          <Tip key={valign} label={`Place text at the ${valign} of its box`} className="w-full [&>button]:w-full">
+                            <button
+                              type="button"
+                              className={`min-h-[44px] py-2 capitalize md:min-h-0 ${
+                                (selected.valign || 'top') === valign ? 'bg-brand-500/10 text-brand-700 dark:text-brand-300' : 'hover:bg-[hsl(var(--muted))]'
+                              }`}
+                              onClick={() => patchLayer(selected.id, { valign })}
+                            >
+                              {valign}
+                            </button>
+                          </Tip>
                         ))}
                       </div>
 
@@ -1815,7 +1929,7 @@ export function InhouseTemplateEditor({
       </div>
       <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
         Shortcuts: arrows move 1px · Shift+arrows 10px · ⌘/Ctrl+D duplicate · ⌘/Ctrl+C/V copy-paste · Delete removes ·
-        ⌘/Ctrl+Z undo · ⌘/Ctrl+S save.
+        ⌘/Ctrl+B/I/U bold · italic · underline · ⌘/Ctrl+Z undo · ⌘/Ctrl+S save. Hover any icon to see what it does.
       </p>
     </section>
   );

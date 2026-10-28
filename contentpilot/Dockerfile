@@ -74,8 +74,17 @@ RUN --mount=type=cache,id=npm-api,target=/root/.npm \
 FROM base AS api
 # fontconfig + fonts: sharp/librsvg rasterises the SVG poster slides with system
 # fonts when publishing. Without them every headline vanishes (blank cards).
+# Brand Studio offers many typefaces. Install each separately so one missing package never fails the
+# build; the renderer falls back along the CSS font stack for any that are unavailable.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends openssl ca-certificates fontconfig fonts-dejavu-core fonts-liberation \
+ && for pkg in fonts-inter fonts-roboto fonts-open-sans fonts-lato fonts-montserrat fonts-poppins \
+      fonts-raleway fonts-oswald fonts-bebas-neue fonts-anton fonts-playfair-display fonts-merriweather \
+      fonts-lora fonts-libre-baskerville fonts-lobster fonts-pacifico fonts-dancing-script fonts-caveat \
+      fonts-firacode fonts-ubuntu fonts-noto-core; do \
+      apt-get install -y --no-install-recommends "$pkg" || echo "[fonts] skipped $pkg"; \
+    done \
+ && fc-cache -f >/dev/null 2>&1 || true \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /app/uploads \
  && chown node:node /app/uploads
@@ -112,6 +121,13 @@ CMD ["sh", "-c", "HOSTNAME=0.0.0.0 exec node apps/web/server.js"]
 FROM base AS app
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tini openssl ca-certificates fontconfig fonts-dejavu-core fonts-liberation \
+ && for pkg in fonts-inter fonts-roboto fonts-open-sans fonts-lato fonts-montserrat fonts-poppins \
+      fonts-raleway fonts-oswald fonts-bebas-neue fonts-anton fonts-playfair-display fonts-merriweather \
+      fonts-lora fonts-libre-baskerville fonts-lobster fonts-pacifico fonts-dancing-script fonts-caveat \
+      fonts-firacode fonts-ubuntu fonts-noto-core; do \
+      apt-get install -y --no-install-recommends "$pkg" || echo "[fonts] skipped $pkg"; \
+    done \
+ && fc-cache -f >/dev/null 2>&1 || true \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /app/uploads \
  && chown node:node /app/uploads

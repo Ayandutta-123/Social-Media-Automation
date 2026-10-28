@@ -50,13 +50,6 @@ const TEXT_FILL_OPTIONS: Array<{ id: BrandFillType; label: string; hint: string 
   { id: 'custom_text', label: 'Custom text', hint: 'Free-form — uses fill hint below' },
 ];
 
-type PostPreset = {
-  id: string;
-  label: string;
-  description: string;
-  zones: Array<{ slot: string; fillType: BrandFillType; lineCount: number; fillHint: string }>;
-};
-
 type BrandLayer = {
   id: string;
   type: 'text' | 'image' | 'rect' | 'ellipse';
@@ -105,55 +98,6 @@ type PlacidCatalogItem = {
   thumbnail?: string | null;
   layers: Array<{ name: string; type: string }>;
 };
-
-const FALLBACK_PRESETS: PostPreset[] = [
-  {
-    id: 'festival',
-    label: 'Festival / greeting',
-    description: 'Headline + 2 body lines',
-    zones: [
-      { slot: 'headline', fillType: 'headline', lineCount: 1, fillHint: 'Greeting' },
-      { slot: 'body', fillType: 'json', lineCount: 2, fillHint: '2 body lines' },
-    ],
-  },
-  {
-    id: 'product_launch',
-    label: 'Product launch',
-    description: 'Headline + 3 body lines',
-    zones: [
-      { slot: 'headline', fillType: 'headline', lineCount: 1, fillHint: 'Launch' },
-      { slot: 'body', fillType: 'json', lineCount: 3, fillHint: '3 body lines' },
-    ],
-  },
-  {
-    id: 'offer',
-    label: 'Offer / promo',
-    description: 'Headline + body + offer',
-    zones: [
-      { slot: 'headline', fillType: 'headline', lineCount: 1, fillHint: 'Promo' },
-      { slot: 'body', fillType: 'json', lineCount: 2, fillHint: '2 body lines' },
-      { slot: 'offer', fillType: 'offer', lineCount: 1, fillHint: 'Deal' },
-    ],
-  },
-  {
-    id: 'announcement',
-    label: 'Announcement',
-    description: 'Headline + 2 body lines',
-    zones: [
-      { slot: 'headline', fillType: 'headline', lineCount: 1, fillHint: 'Announcement' },
-      { slot: 'body', fillType: 'json', lineCount: 2, fillHint: '2 body lines' },
-    ],
-  },
-  {
-    id: 'custom',
-    label: 'Custom',
-    description: 'Configure zones yourself',
-    zones: [
-      { slot: 'headline', fillType: 'headline', lineCount: 1, fillHint: 'Headline' },
-      { slot: 'subheadline', fillType: 'subheadline', lineCount: 1, fillHint: 'Support' },
-    ],
-  },
-];
 
 function isLayerDynamic(layer: BrandLayer): boolean {
   if (layer.fillMode) return layer.fillMode === 'dynamic';
@@ -210,8 +154,6 @@ export default function BrandStudioWorkspace({
   const [name, setName] = useState('');
   const [provider, setProvider] = useState<'inhouse' | 'placid'>(forcedWorkspace);
   const [placidId, setPlacidId] = useState('');
-  const [postType, setPostType] = useState('festival');
-  const [presets, setPresets] = useState<PostPreset[]>(FALLBACK_PRESETS);
   const [placidConfigured, setPlacidConfigured] = useState(false);
   const [placidCatalog, setPlacidCatalog] = useState<PlacidCatalogItem[]>([]);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
@@ -282,12 +224,11 @@ export default function BrandStudioWorkspace({
   const load = async (preferId?: string) => {
     const r = await api<{
       data: BrandTemplate[];
-      meta?: { placidConfigured?: boolean; postPresets?: PostPreset[] };
+      meta?: { placidConfigured?: boolean };
     }>('/brand/templates');
     setTemplates(r.data);
     const configured = Boolean(r.meta?.placidConfigured);
     setPlacidConfigured(configured);
-    if (r.meta?.postPresets?.length) setPresets(r.meta.postPresets);
     const nextId = preferId || selectedId || (() => {
       const match = r.data.find((t) => {
         const placid = t.provider === 'placid' || t.canvas?.designSource === 'placid';
@@ -304,9 +245,6 @@ export default function BrandStudioWorkspace({
         if (!fullPage) {
           setWorkspace(placid ? 'placid' : 'inhouse');
           setProvider(placid ? 'placid' : 'inhouse');
-        }
-        if (picked.canvas?.postType && picked.canvas.postType !== 'placid') {
-          setPostType(picked.canvas.postType);
         }
         if (picked.placidTemplateId) setPlacidId(picked.placidTemplateId);
       }
@@ -395,7 +333,7 @@ export default function BrandStudioWorkspace({
           provider: nextProvider,
           placidTemplateId: nextProvider === 'placid' ? nextPlacidId : undefined,
           useDefaultCanvas: nextProvider === 'inhouse',
-          postType: nextProvider === 'inhouse' ? postType : 'placid',
+          postType: nextProvider === 'inhouse' ? 'custom' : 'placid',
         },
       });
       setName('');
@@ -464,7 +402,7 @@ export default function BrandStudioWorkspace({
     try {
       const res = await api<{ data: BrandTemplate }>(`/brand/templates/${selected.id}`, {
         method: 'PATCH',
-        body: { scaffoldLayout: true, postType: selected.canvas?.postType || postType },
+        body: { scaffoldLayout: true, postType: selected.canvas?.postType || 'custom' },
       });
       setTemplates((prev) => prev.map((t) => (t.id === res.data.id ? res.data : t)));
       setOkMsg('Layout rebuilt: logo, header, headline, hero image, body, footer. Mark Fixed vs Dynamic.');
@@ -478,27 +416,6 @@ export default function BrandStudioWorkspace({
     }
   };
 
-  const applyPostType = async (id: string) => {
-    if (!selected || isPlacid) return;
-    setSavingZones(true);
-    setError('');
-    try {
-      const res = await api<{ data: BrandTemplate }>(`/brand/templates/${selected.id}`, {
-        method: 'PATCH',
-        body: { postType: id, scaffoldLayout: true },
-      });
-      setTemplates((prev) => prev.map((t) => (t.id === res.data.id ? res.data : t)));
-      setPostType(id);
-      setOkMsg(`Applied “${presets.find((p) => p.id === id)?.label || id}” layout.`);
-      notifySuccess(`Applied “${presets.find((p) => p.id === id)?.label || id}” layout`);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Could not apply post type';
-      setError(msg);
-      notifyError(msg);
-    } finally {
-      setSavingZones(false);
-    }
-  };
 
   const saveZones = async (canvasFromEditor?: EditorCanvas) => {
     if (!selected) return;
@@ -661,7 +578,6 @@ export default function BrandStudioWorkspace({
     const match = templates.find((t) => (next === 'placid' ? isPlacidTemplate(t) : !isPlacidTemplate(t)));
     if (match) {
       setSelectedId(match.id);
-      if (match.canvas?.postType && match.canvas.postType !== 'placid') setPostType(match.canvas.postType);
       if (match.placidTemplateId) setPlacidId(match.placidTemplateId);
     } else {
       setSelectedId('');
@@ -675,7 +591,6 @@ export default function BrandStudioWorkspace({
     const placid = isPlacidTemplate(t);
     setWorkspace(placid ? 'placid' : 'inhouse');
     setProvider(placid ? 'placid' : 'inhouse');
-    if (t.canvas?.postType && t.canvas.postType !== 'placid') setPostType(t.canvas.postType);
     if (t.placidTemplateId) setPlacidId(t.placidTemplateId);
   };
 
@@ -1174,16 +1089,6 @@ export default function BrandStudioWorkspace({
                     placeholder="Festival square"
                   />
                 </div>
-                <div>
-                  <label className="label">Post type</label>
-                  <select className="input text-sm" value={postType} onChange={(e) => setPostType(e.target.value)}>
-                    {presets.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
                 <ProcessingButton
                   className="w-full"
                   disabled={!name.trim()}
@@ -1404,18 +1309,6 @@ export default function BrandStudioWorkspace({
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <select
-                        className="input min-h-[44px] md:!min-h-[36px] !w-auto text-xs"
-                        value={selected.canvas.postType || postType}
-                        onChange={(e) => void applyPostType(e.target.value)}
-                        disabled={savingZones || scaffolding}
-                      >
-                        {presets.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.label}
-                          </option>
-                        ))}
-                      </select>
                       <ProcessingButton
                         className="min-h-[44px] md:!min-h-[36px] !px-3 text-xs"
                         loading={scaffolding}

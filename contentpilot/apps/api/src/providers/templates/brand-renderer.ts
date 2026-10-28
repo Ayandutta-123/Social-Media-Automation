@@ -257,6 +257,7 @@ export type BrandLayer = {
   strokeWidth?: number;
   /** Typography extras */
   fontStyle?: 'normal' | 'italic';
+  textDecoration?: 'none' | 'underline' | 'line-through';
   lineHeight?: number;
   letterSpacing?: number;
   textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
@@ -411,13 +412,25 @@ function wrapText(text: string, maxCharsPerLine: number): string[] {
   return lines.slice(0, 12);
 }
 
+/** Average glyph width relative to a regular sans, so fitting works for condensed and wide faces. */
+function fontWidthScale(fontFamily?: string): number {
+  const first = (fontFamily || '').split(',')[0].replace(/["']/g, '').trim().toLowerCase();
+  if (/(bebas|anton|oswald|league gothic|fjalla|barlow condensed|pathway)/.test(first)) return 0.78;
+  if (/(montserrat|poppins|raleway|archivo black|syne|unbounded)/.test(first)) return 1.1;
+  if (/(courier|mono|fira code|jetbrains)/.test(first)) return 1.0;
+  if (/(lobster|pacifico|dancing|caveat|satisfy|great vibes|permanent marker|bangers)/.test(first)) return 0.95;
+  if (/(impact)/.test(first)) return 0.85;
+  if (/(playfair|merriweather|lora|georgia|times|palatino|libre baskerville)/.test(first)) return 1.04;
+  return 1;
+}
+
 /** Average glyph width as a fraction of font-size (bold headlines are wider). */
 function estimateCharWidthFactor(layer: BrandLayer): number {
   const weight = Number.parseInt(String(layer.fontWeight || '600'), 10);
   const bold = Number.isFinite(weight) ? weight >= 600 : true;
   const tracking = Math.max(0, layer.letterSpacing || 0);
   // Empirically, 0.55 was too narrow → fitted font stayed too large → side crop.
-  const base = bold ? 0.68 : 0.58;
+  const base = (bold ? 0.68 : 0.58) * fontWidthScale(layer.fontFamily);
   return base + tracking / Math.max(12, layer.fontSize || 36);
 }
 
@@ -1022,7 +1035,11 @@ export async function renderBrandCanvasSvg(
           ? ` stroke="${escapeXml(layer.textStrokeColor)}" stroke-width="${layer.textStrokeWidth}" paint-order="stroke"`
           : '';
       const spacing = layer.letterSpacing ? ` letter-spacing="${layer.letterSpacing}"` : '';
-      const style = layer.fontStyle === 'italic' ? ' font-style="italic"' : '';
+      const style =
+        (layer.fontStyle === 'italic' ? ' font-style="italic"' : '') +
+        (layer.textDecoration === 'underline' || layer.textDecoration === 'line-through'
+          ? ` text-decoration="${layer.textDecoration}"`
+          : '');
       const filter = shadowFilter(layer, index);
       // Clip to layer box so any residual overflow never crops past the frame
       const clipId = `text_clip_${index}`;

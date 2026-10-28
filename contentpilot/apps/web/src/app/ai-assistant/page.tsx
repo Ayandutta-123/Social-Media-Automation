@@ -1155,7 +1155,7 @@ function AiAssistantInner() {
                               {t.provider === 'inhouse' || t.canvas?.designSource === 'inhouse'
                                 ? 'In-house'
                                 : 'Imported'}
-                              {t.canvas?.postType ? ` · ${t.canvas.postType}` : ''}
+                              
                             </p>
                           </div>
                         </button>
@@ -1341,7 +1341,7 @@ function AiAssistantInner() {
                         {t.provider === 'inhouse' || t.canvas?.designSource === 'inhouse'
                           ? 'In-house template'
                           : 'Imported template'}
-                        {t.canvas?.postType ? ` · ${t.canvas.postType}` : ''}
+                        
                       </span>
                       {selectedId === t.id && (
                         <span className="mt-2 inline-flex text-[10px] font-bold uppercase tracking-wide text-brand-700">
