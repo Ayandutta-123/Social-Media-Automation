@@ -2,7 +2,21 @@ import fs from 'fs';
 import path from 'path';
 import { config } from '../../config';
 
-export type SocialImageFormat = 'instagram_square' | 'instagram_portrait' | 'linkedin' | 'story';
+/**
+ * Post canvases (what is published) and art-only aspect classes (what the image model draws).
+ * `art_*` formats are never published; they let the photo be generated at the shape of the slot
+ * it will sit in, so nothing is cropped afterwards.
+ */
+export type SocialImageFormat =
+  | 'instagram_square'
+  | 'instagram_portrait'
+  | 'linkedin'
+  | 'story'
+  | 'art_2x3'
+  | 'art_3x4'
+  | 'art_5x4'
+  | 'art_3x2'
+  | 'art_16x9';
 
 export type LogoPlacement = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
@@ -39,33 +53,112 @@ export type VisualStyleId =
 
 export const SOCIAL_IMAGE_FORMATS: Record<
   SocialImageFormat,
-  { label: string; width: number; height: number; falSize: string | { width: number; height: number } }
+  {
+    label: string;
+    width: number;
+    height: number;
+    falSize: string | { width: number; height: number };
+    /** Aspect ratio string for models that take one (nano-banana, etc.). */
+    aspect: string;
+  }
 > = {
   instagram_square: {
-    label: 'Instagram / feed (1080×1080)',
+    label: 'Square 1:1 (1080×1080)',
     width: 1080,
     height: 1080,
     falSize: 'square_hd',
+    aspect: '1:1',
   },
   instagram_portrait: {
-    label: 'Instagram portrait (1080×1350)',
+    label: 'Portrait 4:5 (1080×1350)',
     width: 1080,
     height: 1350,
     falSize: { width: 1080, height: 1350 },
+    aspect: '4:5',
   },
   linkedin: {
-    label: 'LinkedIn (1200×627)',
+    label: 'Landscape 1.91:1 (1200×627)',
     width: 1200,
     height: 627,
     falSize: { width: 1200, height: 627 },
+    aspect: '16:9',
   },
   story: {
-    label: 'Story / Reels (1080×1920)',
+    label: 'Story / Reels 9:16 (1080×1920)',
     width: 1080,
     height: 1920,
     falSize: { width: 1080, height: 1920 },
+    aspect: '9:16',
   },
+  art_2x3: { label: 'Art 2:3', width: 1024, height: 1536, falSize: { width: 1024, height: 1536 }, aspect: '2:3' },
+  art_3x4: { label: 'Art 3:4', width: 1152, height: 1536, falSize: { width: 1152, height: 1536 }, aspect: '3:4' },
+  art_5x4: { label: 'Art 5:4', width: 1280, height: 1024, falSize: { width: 1280, height: 1024 }, aspect: '5:4' },
+  art_3x2: { label: 'Art 3:2', width: 1536, height: 1024, falSize: { width: 1536, height: 1024 }, aspect: '3:2' },
+  art_16x9: { label: 'Art 16:9', width: 1536, height: 864, falSize: { width: 1536, height: 864 }, aspect: '16:9' },
 };
+
+/** Formats a user can publish to. Landscape suits link-style posts; designed templates use 1:1 or 4:5. */
+export const PUBLISH_FORMATS = ['instagram_square', 'instagram_portrait', 'linkedin', 'story'] as const;
+
+/**
+ * Aspect-ratio window each network accepts for a feed image. Anything outside is cropped or
+ * rejected by the platform, so the publisher never sends it as-is.
+ * Instagram Graph API: 4:5 to 1.91:1. LinkedIn: 1:1, 4:5 and 1.91:1. Facebook: 9:16 to 16:9.
+ */
+export const PLATFORM_ASPECT_LIMITS: Record<string, { min: number; max: number; ideal: SocialImageFormat }> = {
+  instagram: { min: 0.8, max: 1.91, ideal: 'instagram_portrait' },
+  facebook: { min: 9 / 16, max: 16 / 9, ideal: 'instagram_portrait' },
+  linkedin: { min: 0.8, max: 1.91, ideal: 'instagram_square' },
+  twitter: { min: 0.5, max: 2, ideal: 'linkedin' },
+};
+
+/**
+ * One image that is native (uncropped) on every selected network.
+ * 4:5 is Instagram's and Facebook's best feed size and is accepted by LinkedIn, so any mix that
+ * includes Instagram or Facebook gets 4:5; LinkedIn alone gets a 1:1 square.
+ */
+export function formatForPlatforms(platforms?: readonly string[] | null, explicit?: SocialImageFormat | null): SocialImageFormat {
+  if (explicit) return explicit;
+  const set = new Set((platforms || []).map((p) => String(p).toLowerCase()));
+  if (set.has('instagram') || set.has('facebook')) return 'instagram_portrait';
+  if (set.has('linkedin')) return 'instagram_square';
+  if (set.has('twitter')) return 'linkedin';
+  return 'instagram_portrait';
+}
+
+/** True when this canvas is within the aspect window of every given platform. */
+export function formatFitsPlatforms(format: SocialImageFormat, platforms: readonly string[]): boolean {
+  const { width, height } = SOCIAL_IMAGE_FORMATS[format];
+  const ratio = width / height;
+  return platforms.every((p) => {
+    const lim = PLATFORM_ASPECT_LIMITS[String(p).toLowerCase()];
+    return !lim || (ratio >= lim.min - 0.005 && ratio <= lim.max + 0.005);
+  });
+}
+
+/** Closest art aspect class for a slot of this shape (log-scale distance). */
+export function nearestArtFormat(aspectWOverH: number): SocialImageFormat {
+  const candidates: Array<[SocialImageFormat, number]> = [
+    ['story', 9 / 16],
+    ['art_2x3', 2 / 3],
+    ['art_3x4', 3 / 4],
+    ['instagram_portrait', 4 / 5],
+    ['instagram_square', 1],
+    ['art_5x4', 5 / 4],
+    ['art_3x2', 3 / 2],
+    ['art_16x9', 16 / 9],
+  ];
+  let best = candidates[3]!;
+  let bestD = Infinity;
+  for (const c of candidates) {
+    const d = Math.abs(Math.log(aspectWOverH / c[1]));
+    if (d < bestD) {
+      best = c;
+      bestD = d;
+    }
+  }
+  return best[0];
+}
 
 /** Presets users can pick in Approvals / generators — LinkedIn/B2B social quality */
 export const VISUAL_STYLE_PRESETS: Array<{

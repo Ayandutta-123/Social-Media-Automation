@@ -13,6 +13,7 @@ import {
   type TemplateSlotMap,
 } from './content-template.service';
 import { isLayerDynamic } from '../providers/templates/brand-renderer';
+import { formatForPlatforms } from '../providers/images/social-frame';
 import { extractCarouselPayload } from '../lib/carousel-parse';
 import type { PosterSpec } from '../providers/images/poster-frame';
 
@@ -162,6 +163,7 @@ class ApprovalService {
       brandTemplateId?: string | null;
       templateSlots?: unknown;
       imagePrompt?: string | null;
+      targetPlatforms?: unknown;
     },
     feedback?: string,
   ) {
@@ -365,7 +367,7 @@ Generate an improved version that specifically addresses that request.`,
                 'hero_right',
               slideLabel: slideSpec ? `${i + 1} / ${slideCount}` : null,
               negativePrompt: slideSpec?.artNegativePrompt ?? null,
-              format: 'instagram_square',
+              format: formatForPlatforms(asStringArray(content.targetPlatforms)),
               headerText: headline,
               footerCta:
                 i === slideCount - 1 ? post.callToAction || null : `Slide ${i + 1} / ${slideCount}`,
@@ -400,7 +402,7 @@ Generate an improved version that specifically addresses that request.`,
                 ...slots,
                 format: 'carousel',
                 ...(posterSpec ? { posterSpec: posterSpec as unknown as Record<string, unknown> } : {}),
-                carousel: { slideCount: slides.length, slides },
+                carousel: { slideCount: slides.length, slides, format: formatForPlatforms(asStringArray(content.targetPlatforms)) },
               } as object,
             },
           });
@@ -422,7 +424,7 @@ Generate an improved version that specifically addresses that request.`,
                   ? (prevSlotsRaw.posterLayout as import('../providers/images/poster-frame').PosterLayoutId)
                   : undefined,
               negativePrompt: posterSpec.artNegativePrompt,
-              format: 'instagram_square',
+              format: formatForPlatforms(asStringArray(content.targetPlatforms)),
               overlay: { overlaysEnabled: true },
               posterQuality: true,
             },

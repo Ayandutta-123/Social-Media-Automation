@@ -3,6 +3,7 @@ import path from 'path';
 import sharp from 'sharp';
 import { config } from '../config';
 import { toPublicMediaUrl } from './public-media-url';
+import { PLATFORM_ASPECT_LIMITS } from '../providers/images/social-frame';
 import { resolveUploadPath } from '../providers/templates/brand-renderer';
 import { resolveProviders } from '../services/providers.service';
 import { uploadPlacidMedia } from '../providers/templates/placid.client';
@@ -98,7 +99,8 @@ async function rasterizeToJpeg(bytes: PublishImageBytes): Promise<PublishImageBy
     }
   }
 
-  const buffer = await sharp(bytes.buffer, { failOn: 'none', density: 150 })
+  // density 72 = 1 SVG unit per pixel, so the JPEG is exactly the canvas size (no resampling).
+  const buffer = await sharp(bytes.buffer, { failOn: 'none', density: 72 })
     .rotate()
     .flatten({ background: '#ffffff' })
     .jpeg({ quality: 92, mozjpeg: true })
@@ -157,6 +159,67 @@ export async function toInstagramJpeg(bytes: PublishImageBytes): Promise<Publish
   const jpeg = await rasterizeToJpeg(bytes);
   await assertImageNotBlank(jpeg.buffer, `Image ${bytes.filename}`);
   return jpeg;
+}
+
+/** Aspect window shared by every selected network (the strictest bounds win). */
+export function aspectWindowFor(platforms: readonly string[]): { min: number; max: number } {
+  let min = 0;
+  let max = Infinity;
+  for (const p of platforms) {
+    const lim = PLATFORM_ASPECT_LIMITS[String(p).toLowerCase()];
+    if (!lim) continue;
+    min = Math.max(min, lim.min);
+    max = Math.min(max, lim.max);
+  }
+  return { min: min || 0.8, max: Number.isFinite(max) ? max : 1.91 };
+}
+
+/**
+ * Make sure a feed image is a shape the networks show whole. Anything inside the window is passed
+ * through untouched (no resize, no crop). Outside it, the original is fitted — never cropped — onto
+ * the nearest allowed shape over a blurred, darkened copy of itself.
+ */
+export async function ensureFeedAspect(
+  bytes: PublishImageBytes,
+  win: { min: number; max: number },
+): Promise<{ bytes: PublishImageBytes; adjusted: boolean; from: string; to?: string }> {
+  const meta = await sharp(bytes.buffer, { failOn: 'none' }).metadata();
+  const w = meta.width || 0;
+  const h = meta.height || 0;
+  if (!w || !h) return { bytes, adjusted: false, from: 'unknown' };
+  const ratio = w / h;
+  const from = `${w}×${h}`;
+  const tol = 0.004;
+  if (ratio >= win.min - tol && ratio <= win.max + tol) return { bytes, adjusted: false, from };
+
+  const target = ratio < win.min ? win.min : win.max;
+  let cw = w;
+  let ch = h;
+  if (ratio < win.min) cw = Math.round(h * target); // too tall → widen the canvas
+  else ch = Math.round(w / target); // too wide → heighten the canvas
+  const background = await sharp(bytes.buffer, { failOn: 'none' })
+    .resize(cw, ch, { fit: 'cover' })
+    .blur(40)
+    .modulate({ brightness: 0.75 })
+    .jpeg({ quality: 80 })
+    .toBuffer();
+  let composed = await sharp(background)
+    .composite([{ input: await sharp(bytes.buffer, { failOn: 'none' }).jpeg({ quality: 95 }).toBuffer(), left: Math.round((cw - w) / 2), top: Math.round((ch - h) / 2) }])
+    .jpeg({ quality: 92, mozjpeg: true })
+    .toBuffer();
+  // Instagram accepts widths up to 1440px.
+  if (cw > 1440) {
+    composed = await sharp(composed).resize({ width: 1440 }).jpeg({ quality: 92, mozjpeg: true }).toBuffer();
+    ch = Math.round((ch * 1440) / cw);
+    cw = 1440;
+  }
+  const buffer = composed;
+  return {
+    bytes: { buffer, filename: bytes.filename.replace(/\.[^.]+$/, '.jpg'), mimetype: 'image/jpeg' },
+    adjusted: true,
+    from,
+    to: `${cw}×${ch}`,
+  };
 }
 
 /**
@@ -242,13 +305,18 @@ async function uploadPublicJpegHost(jpeg: PublishImageBytes): Promise<string> {
 export async function hostImageForSocialPublish(
   tenantId: string,
   url: string,
+  platforms: readonly string[] = ['instagram'],
 ): Promise<string> {
   const trimmed = (url || '').trim();
   if (!trimmed) throw new Error('No image URL to publish');
 
   // Fast path: already a public image on a Meta-reachable HTTPS CDN
   if (isExternallyReachableHttps(trimmed) && !/\.svg(\?|$)/i.test(trimmed)) {
-    return trimmed;
+    // Only skip our own pipeline when its shape is already acceptable; otherwise fit it (never crop).
+    const peek = await loadImageBytesForPublish(trimmed);
+    if (!peek) return trimmed;
+    const probe = await ensureFeedAspect(peek, aspectWindowFor(platforms));
+    if (!probe.adjusted) return trimmed;
   }
 
   const loaded = await loadImageBytesForPublish(trimmed);
@@ -258,7 +326,12 @@ export async function hostImageForSocialPublish(
     );
   }
 
-  const jpeg = await toInstagramJpeg(loaded);
+  const rasterized = await toInstagramJpeg(loaded);
+  const fitted = await ensureFeedAspect(rasterized, aspectWindowFor(platforms));
+  if (fitted.adjusted) {
+    console.warn(`[publish] ${fitted.from} is outside ${platforms.join('/')} feed shape; fitted to ${fitted.to} without cropping`);
+  }
+  const jpeg = fitted.bytes;
 
   const own = await hostOnOwnApi(tenantId, jpeg);
   if (own) return own;
@@ -292,11 +365,12 @@ export async function hostImageForSocialPublish(
 export async function resolvePublishImageUrls(
   tenantId: string,
   urls: Array<string | null | undefined>,
+  platforms: readonly string[] = ['instagram'],
 ): Promise<string[]> {
   const out: string[] = [];
   for (const u of urls) {
     if (!u?.trim()) continue;
-    out.push(await hostImageForSocialPublish(tenantId, u.trim()));
+    out.push(await hostImageForSocialPublish(tenantId, u.trim(), platforms));
   }
   return out;
 }

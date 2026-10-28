@@ -232,10 +232,10 @@ function buildPlatformCaptionsPayload(edited: Record<CaptionTab, PlatformCaption
 }
 
 const IMAGE_FORMATS = [
-  { id: 'instagram_square', label: 'Instagram feed 1080×1080' },
-  { id: 'instagram_portrait', label: 'Instagram portrait 1080×1350' },
-  { id: 'linkedin', label: 'LinkedIn 1200×627' },
-  { id: 'story', label: 'Story / Reels 1080×1920' },
+  { id: 'instagram_portrait', label: 'Portrait 4:5 · 1080×1350 (Instagram, Facebook, LinkedIn)' },
+  { id: 'instagram_square', label: 'Square 1:1 · 1080×1080 (LinkedIn, Instagram, Facebook)' },
+  { id: 'linkedin', label: 'Landscape 1.91:1 · 1200×627 (LinkedIn)' },
+  { id: 'story', label: 'Story / Reels 9:16 · 1080×1920' },
 ] as const;
 
 const VISUAL_STYLES = [
@@ -287,7 +287,7 @@ export default function ApprovalDetailPage() {
   const [error, setError] = useState('');
   const [okMsg, setOkMsg] = useState('');
   const [imagePrompt, setImagePrompt] = useState('');
-  const [imageFormat, setImageFormat] = useState<(typeof IMAGE_FORMATS)[number]['id']>('instagram_square');
+  const [imageFormat, setImageFormat] = useState<(typeof IMAGE_FORMATS)[number]['id']>('instagram_portrait');
   const [exactPrompt, setExactPrompt] = useState(false);
   /** When false, regenerate as full AI social image (no Brand Studio / Placid plate) */
   const [useTemplate, setUseTemplate] = useState(false);

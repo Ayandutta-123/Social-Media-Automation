@@ -24,6 +24,7 @@ import {
   applyExactImageToSlots,
   pictureLayersForFill,
 } from '../services/fill-brand-template.service';
+import { formatForPlatforms } from '../providers/images/social-frame';
 
 export type CompetitorImageMode = 'new_topic' | 'near_mirror';
 
@@ -565,7 +566,7 @@ ${
           logoUrl:
             preferOriginalLogoUrl(brandSettings?.logoUrl) || brandSettings?.logoUrl || null,
           creativeType: 'social',
-          format: 'instagram_square',
+          format: formatForPlatforms(opts.platforms),
           headerText: post.headline,
           footerCta: post.callToAction || null,
           overlay: { overlaysEnabled: true },

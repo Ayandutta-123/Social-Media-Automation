@@ -1,4 +1,5 @@
 import { ContentEngine } from '@contentpilot/shared';
+import { formatForPlatforms, SOCIAL_IMAGE_FORMATS, type SocialImageFormat } from '../providers/images/social-frame';
 import { prisma } from '../lib/prisma';
 import { LLMService } from './llm.service';
 import { executionLogService } from './execution-log.service';
@@ -59,6 +60,10 @@ export type GenerateCarouselSlidesInput = {
   heroImageUrls?: Array<string | null | undefined>;
   /** Brand kit contacts for the last-slide CTA strip (only filled fields are shown). */
   contacts?: BrandContactLinks | null;
+  /** Canvas for every slide. Defaults from `platforms`, else 4:5 (native on Instagram, Facebook, LinkedIn). */
+  format?: SocialImageFormat;
+  /** Target networks — used to pick the native size when `format` is not given. */
+  platforms?: readonly string[];
 };
 
 export type GenerateCarouselSlidesResult = {
@@ -87,7 +92,6 @@ export async function generateCarouselSlides(
   const llm = await LLMService.forTenant(input.tenantId);
   const { attachGeneratedImage } = await import('./image-attach.service');
   const { brandPosterFrame } = await import('../providers/images/poster-frame');
-  const { SOCIAL_IMAGE_FORMATS } = await import('../providers/images/social-frame');
 
   const engine = input.engine || ContentEngine.CALENDAR;
   const workflowStep = input.workflowStep || 'carousel:slides';
@@ -250,14 +254,15 @@ Produce ${slideCount} slides. imagePrompt = photography only; layout id is separ
     });
   }
 
-  const format = SOCIAL_IMAGE_FORMATS.instagram_square;
+  const postFormat: SocialImageFormat = input.format || formatForPlatforms(input.platforms);
+  const format = SOCIAL_IMAGE_FORMATS[postFormat];
 
   const baseAttach = {
     brandImageStyle: input.brandImageStyle,
     companyName: input.companyName || input.company,
     logoUrl,
     creativeType: 'poster' as const,
-    format: 'instagram_square' as const,
+    format: postFormat,
     overlay: { overlaysEnabled: true },
     visualStyleId,
     posterQuality: true,
@@ -341,6 +346,7 @@ Produce ${slideCount} slides. imagePrompt = photography only; layout id is separ
     },
     carousel: {
       slideCount: slides.length,
+      format: postFormat,
       slides,
       contacts: contactChips,
       layouts,

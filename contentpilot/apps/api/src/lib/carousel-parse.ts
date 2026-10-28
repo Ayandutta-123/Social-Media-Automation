@@ -17,6 +17,8 @@ export type CarouselSlide = {
 export type CarouselPayload = {
   slideCount: number;
   slides: CarouselSlide[];
+  /** Canvas every slide was rendered at (platform-native); older carousels are 1:1. */
+  format?: 'instagram_square' | 'instagram_portrait' | 'linkedin' | 'story';
 };
 
 /**
@@ -103,7 +105,12 @@ export function extractCarouselPayload(templateSlots: unknown): CarouselPayload 
     });
   }
   if (!slides.length) return null;
+  const fmt = obj.format;
   return {
+    format:
+      fmt === 'instagram_portrait' || fmt === 'linkedin' || fmt === 'story' || fmt === 'instagram_square'
+        ? fmt
+        : undefined,
     slideCount:
       typeof obj.slideCount === 'number' && obj.slideCount >= 1
         ? clampSlideCount(obj.slideCount)

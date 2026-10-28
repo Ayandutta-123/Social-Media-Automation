@@ -227,11 +227,11 @@ const DESIGNS: Record<string, DesignFn> = {
     const { W, H, u, pad, c, s } = ctx;
     const ax = pad;
     const ay = pad * 1.3;
-    const aw = W * 0.4;
-    const ah = H - ay - pad * 1.5;
+    const aw = W * 0.44;
+    const ah = Math.min(H - ay - pad * 1.5, aw * 1.75);
     let out = bg(ctx) + circle(ax + aw * 0.85, ay + ah * 0.1, aw * 0.5, c.accent, { opacity: 0.18 });
     out += k.photo(ax, ay, aw, ah, 'arch');
-    const tx = W * 0.5;
+    const tx = W * 0.54;
     const tw = W - tx - pad;
     out += k.brand(tx, pad, { height: 44 * u });
     let y = ay + 70 * u;
@@ -479,9 +479,9 @@ const DESIGNS: Record<string, DesignFn> = {
   aesthetic_band(ctx, k) {
     const { W, H, u, pad, c, s } = ctx;
     const ax = W * 0.46;
-    const ay = H * 0.09;
     const aw = W * 0.44;
-    const ah = H * 0.82;
+    const ah = Math.min(H * 0.82, aw * 1.6);
+    const ay = (H - ah) / 2;
     let out = bg(ctx) + circle(W * 0.3, H * 0.3, W * 0.09, c.accent, { opacity: 0.6 });
     out += `<path d="${archPath(ax - 16 * u, ay - 16 * u, aw + 32 * u, ah + 32 * u)}" fill="none" stroke="${c.accent}" stroke-width="${3 * u}"/>`;
     out += k.photo(ax, ay, aw, ah, 'arch');
@@ -574,7 +574,7 @@ const DESIGNS: Record<string, DesignFn> = {
     const br = W * 0.22;
     out += `<polygon points="${burstPath(bx + 12 * u, by + 14 * u, br, br * 0.86, 22)}" fill="${c.ink}" opacity="0.25"/>`;
     out += `<polygon points="${burstPath(bx, by, br, br * 0.86, 22)}" fill="${c.ground}"/>`;
-    const sf = fit(s.stat || '—', { w: br * 1.45, h: br * 0.9, max: br * 0.9, min: 24, weight: 900, maxLines: 1, lh: 1, cw: 0.8 });
+    const sf = fit(s.stat || '—', { w: br * 1.3, h: br * 0.9, max: br * 0.9, min: 24, weight: 900, maxLines: 1, lh: 1, cw: 0.8 });
     out += textBlock(sf.lines, bx, by - sf.h * 0.62, { size: sf.size, weight: 900, fill: c.accent, anchor: 'middle', font: ctx.headFont, lh: 1 });
     if (s.statLabel) {
       const lf = fit(s.statLabel, { w: br * 1.4, h: 60 * u, max: 26 * u, min: 12, weight: 800, maxLines: 2, upper: true, ls: 2 });
@@ -642,7 +642,7 @@ const DESIGNS: Record<string, DesignFn> = {
     const px = W * 0.56;
     const py = pad * 1.3;
     const pw = W - px - pad;
-    const ph = H - py - pad * 1.3;
+    const ph = Math.min(H - py - pad * 1.3, pw * 1.75);
     let out = bg(ctx) + rect(px - 22 * u, py + 22 * u, pw, ph, 'none', { stroke: c.accent, sw: 4 * u });
     out += k.photo(px, py, pw, ph, 'rect');
     const tw = W * 0.46;
@@ -676,7 +676,7 @@ const DESIGNS: Record<string, DesignFn> = {
     out += k.pill(pad, pad * 0.55, s.eyebrow || 'Report', { fill: c.accent, color: c.onAccent, size: 21 * u, upper: true, ls: 3 }).svg;
     out += k.brand(W - pad, pad * 0.5, { anchor: 'end', height: 44 * u });
     const y0 = pad * 1.1 + 90 * u;
-    const sf = fit(s.stat || '—', { w: W * 0.46, h: H * 0.22, max: 250 * u, min: 40, weight: 900, maxLines: 1, lh: 1, cw: 0.8 });
+    const sf = fit(s.stat || '—', { w: W * 0.4, h: H * 0.22, max: 250 * u, min: 40, weight: 900, maxLines: 1, lh: 1, cw: 0.8 });
     out += textBlock(sf.lines, pad, y0, { size: sf.size, weight: 900, fill: c.accent, font: ctx.headFont, lh: 1 });
     if (s.statLabel) out += k.para(s.statLabel, pad, y0 + sf.h + 6 * u, { w: W * 0.44, h: 80 * u, max: 26 * u, maxLines: 2, fill: c.ink, weight: 700 }).svg;
     out += k.photo(W * 0.54, y0 - 10 * u, W - W * 0.54 - pad, H * 0.32, 'round', { r: 26 * u });
@@ -979,6 +979,42 @@ export function renderDesignSvg(opts: {
 ${ctx.defs.length ? `<defs>${ctx.defs.join('')}</defs>` : ''}
 ${body}
 </svg>`;
+}
+
+/**
+ * The photo slot (largest) a design draws on a canvas of this size. The AI photo is generated at
+ * this aspect so the frame shows the whole image instead of cropping a mismatched one.
+ */
+export function designHeroSlot(templateId: string, width: number, height: number, spec: PosterSpec, palette: InsightPalette): { w: number; h: number; aspect: number } {
+  const design = DESIGNS[templateId];
+  if (!design) return { w: width, h: height, aspect: width / height };
+  const u = width / 1080;
+  let best = { w: 0, h: 0 };
+  const ctx: DesignCtx = {
+    W: width,
+    H: height,
+    u,
+    pad: Math.round(Math.min(width, height) * 0.072),
+    c: designColors(palette),
+    headFont: 'sans-serif',
+    bodyFont: 'sans-serif',
+    artHref: '',
+    logoHref: '',
+    company: '',
+    s: cleanSpec(spec),
+    uid: 'probe',
+    defs: [],
+    onPhoto: (slot) => {
+      if (slot.w * slot.h > best.w * best.h) best = { w: slot.w, h: slot.h };
+    },
+  };
+  try {
+    design(ctx, makeKit(ctx));
+  } catch {
+    return { w: width, h: height, aspect: width / height };
+  }
+  if (!best.w || !best.h) return { w: width, h: height, aspect: width / height };
+  return { ...best, aspect: best.w / best.h };
 }
 
 /** Render a design and store it like every other poster. */

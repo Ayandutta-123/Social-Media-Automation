@@ -11,6 +11,7 @@ import {
   type BrandLayer,
 } from '../providers/templates/brand-renderer';
 import { type TemplateSlotMap } from './content-template.service';
+import { nearestArtFormat } from '../providers/images/social-frame';
 
 function guessFillTypeFromName(name: string, kind: 'text' | 'image'): BrandFillType {
   const n = name.toLowerCase().replace(/[\s-]+/g, '_');
@@ -548,8 +549,12 @@ export async function renderFilledBrandTemplate(opts: {
       },
       providers,
     );
+    // Draw the photo at the shape of the template's largest picture zone so it is not cropped to fit.
+    const biggest = [...picsNeedingArt].sort((x, y) => y.w * y.h - x.w * x.h)[0];
+    const zoneFormat =
+      biggest && biggest.w > 0 && biggest.h > 0 ? nearestArtFormat(biggest.w / biggest.h) : 'instagram_square';
     const image = await generateContentImage(routed, noTextPrompt, {
-      format: 'instagram_square',
+      format: zoneFormat,
       exact: true,
       referenceImageUrl: opts.referenceImageUrl || undefined,
       referenceStrength: opts.referenceImageUrl ? 0.62 : undefined,

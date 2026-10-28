@@ -1,5 +1,5 @@
 import type { PlatformPublisher, PublishContent, PublishResult, MediaContainerStatus } from './publishing.interface';
-import { loadImageBytesForPublish, toInstagramJpeg } from '../../lib/publishable-image';
+import { aspectWindowFor, ensureFeedAspect, loadImageBytesForPublish, toInstagramJpeg } from '../../lib/publishable-image';
 
 export class InstagramPublisher implements PlatformPublisher {
   readonly platform = 'instagram';
@@ -251,10 +251,12 @@ export class LinkedInPublisher implements PlatformPublisher {
     const loaded = await loadImageBytesForPublish(imageUrl);
     if (!loaded) throw new Error('Could not read image file for LinkedIn');
     // LinkedIn accepts PNG/JPEG; normalize exotic formats
-    const prepared =
+    const converted =
       /image\/(png|jpe?g)/i.test(loaded.mimetype) && !/\.svg$/i.test(loaded.filename)
         ? loaded
         : await toInstagramJpeg(loaded);
+    // LinkedIn shows 1.91:1 through 4:5 whole; fit (never crop) anything outside that window.
+    const prepared = (await ensureFeedAspect(converted, aspectWindowFor(['linkedin']))).bytes;
 
     const registerRes = await fetch(
       'https://api.linkedin.com/v2/assets?action=registerUpload',

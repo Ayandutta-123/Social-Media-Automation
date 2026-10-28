@@ -48,6 +48,8 @@ export type DesignCtx = {
   slideLabel?: string | null;
   uid: string;
   defs: string[];
+  /** Called for every photo slot a design draws (used to size the AI photo before generating it). */
+  onPhoto?: (slot: { w: number; h: number; shape: PhotoShape }) => void;
 };
 
 export const SERIF = 'Playfair Display,Georgia,Times New Roman,serif';
@@ -283,6 +285,7 @@ export function makeKit(ctx: DesignCtx) {
     shape: PhotoShape = 'rect',
     o: { r?: number; grade?: number; stroke?: string; sw?: number; focusX?: number; focusY?: number } = {},
   ): string {
+    ctx.onPhoto?.({ w, h, shape });
     const cid = id('clip');
     const r = o.r ?? 28 * u;
     let clip: string;

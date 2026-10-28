@@ -141,6 +141,7 @@ ${imagePromptInstruction(topic, brandSettings?.imageStyle)}`,
     await generateCarouselSlides({
       tenantId,
       contentId,
+      platforms,
       slideCount,
       company,
       brief,

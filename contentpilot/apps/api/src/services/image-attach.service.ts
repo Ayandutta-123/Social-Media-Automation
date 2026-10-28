@@ -12,12 +12,15 @@ import {
   resolveVisualStylePrompt,
   SOCIAL_IMAGE_FORMATS,
   OVERLAY_FONTS,
+  nearestArtFormat,
+  parseBrandPalette,
   type InsightReportContent,
   type LogoPlacement,
   type NewsletterEditionContent,
   type OverlayStyleOpts,
   type SocialImageFormat,
 } from '../providers/images/social-frame';
+import { designHeroSlot, isDesignLayout, templateIdFromLayout } from '../providers/images/poster-designs';
 import { executionLogService } from './execution-log.service';
 import { config } from '../config';
 import { ProviderCreditError, isProviderCreditError } from '../lib/provider-credits';
@@ -83,7 +86,13 @@ async function resolveBrandKitVisuals(
 }
 
 export type AttachImageOpts = {
+  /** Canvas that is published. Defaults to 4:5 portrait (native on Instagram, Facebook and LinkedIn). */
   format?: SocialImageFormat;
+  /**
+   * Aspect the image model draws at. Defaults to `format`; designed templates set it to the shape of
+   * their photo slot so the photo is shown whole instead of being cropped to fit.
+   */
+  artFormat?: SocialImageFormat;
   /** Use the prompt exactly — do not force a default photo style */
   exact?: boolean;
   brandImageStyle?: string | null;
@@ -294,7 +303,7 @@ export async function generateRawArtUrl(
   initialOpts: AttachImageOpts = {},
 ): Promise<string> {
   let opts = initialOpts;
-  const format = opts.format || 'instagram_square';
+  const format = opts.format || 'instagram_portrait';
   const providers = await resolveProviders(tenantId);
   const brand = await prisma.brandSettings.findUnique({ where: { tenantId } });
   let guidedPrompt = imagePrompt.trim();
@@ -412,7 +421,22 @@ export async function attachGeneratedImage(
     }
   }
 
-  const format = opts.format || 'instagram_square';
+  let format: SocialImageFormat = opts.format || 'instagram_portrait';
+  const designed = opts.creativeType === 'poster' && Boolean(opts.posterSpec) && isDesignLayout(opts.posterLayout);
+  // Drawn templates are composed for 1:1 and 4:5; wide canvases get the nearest supported shape.
+  if (designed && (format === 'linkedin' || format === 'story')) format = 'instagram_square';
+  let artFormat: SocialImageFormat = opts.artFormat || format;
+  if (designed && !opts.artFormat) {
+    const dims = SOCIAL_IMAGE_FORMATS[format];
+    const slot = designHeroSlot(
+      templateIdFromLayout(opts.posterLayout as string),
+      dims.width,
+      dims.height,
+      opts.posterSpec as PosterSpec,
+      parseBrandPalette(''),
+    );
+    artFormat = nearestArtFormat(slot.aspect);
+  }
   const logoPlacement: LogoPlacement = opts.logoPlacement || 'top-left';
 
   try {
@@ -646,7 +670,7 @@ export async function attachGeneratedImage(
       companyName: brand.companyName,
       imageStyle: styleLine || brand.imageStyle,
       visualStyleId: opts.visualStyleId,
-      format,
+      format: artFormat,
       exact: opts.exact,
       logoPlacement,
       overlayHeaderFooter: hasOverlays,
@@ -675,11 +699,11 @@ export async function attachGeneratedImage(
       tenantId,
       contentId,
       workflowStep: 'image:generate',
-      message: `request ${providers.imageProvider}/${providers.falModel} ${format} style=${opts.visualStyleId || 'default'} exact=${Boolean(opts.exact)} logo=${logoPlacement} brandKit=${kitVisuals.kitApplied} promptChars=${promptWithKit.length}`,
+      message: `request ${providers.imageProvider}/${providers.falModel} canvas=${format} art=${artFormat} style=${opts.visualStyleId || 'default'} exact=${Boolean(opts.exact)} logo=${logoPlacement} brandKit=${kitVisuals.kitApplied} promptChars=${promptWithKit.length}`,
     });
 
     const { image, decision } = await generateWithSmartRoute(providers, promptWithKit, opts, {
-      format,
+      format: artFormat,
       exact: true,
       referenceImageUrl: opts.referenceImageUrl || undefined,
       referenceStrength: opts.referenceImageUrl ? 0.55 : undefined,
@@ -889,7 +913,7 @@ export async function reframeExistingImage(
   };
 
   const isInsight = slots.playId === 'insight_report' && slots.insightReport;
-  const format = opts.format || 'instagram_square';
+  const format = opts.format || 'instagram_portrait';
   const logoPlacement = opts.logoPlacement || 'top-left';
   const storedPosterSpec =
     slots.posterSpec && typeof slots.posterSpec === 'object' && !Array.isArray(slots.posterSpec)

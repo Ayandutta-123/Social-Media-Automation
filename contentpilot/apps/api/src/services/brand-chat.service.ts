@@ -413,7 +413,7 @@ ${
 Company: ${brandSettings?.companyName || '(not set)'}
 Logo in Settings: ${brandSettings?.logoUrl ? 'yes' : 'no'}
 Brand reference image: ${opts.referenceImageUrl ? 'YES — style-lock to reference' : 'no'}
-Image format: ${opts.imageFormat || 'instagram_square'}
+Image format: ${opts.imageFormat || 'instagram_portrait'}
 
 Return JSON ONLY:
 {
@@ -648,7 +648,7 @@ USER: ${opts.message}`,
 
     if (visualMode === 'new_poster') {
       const includeLogo = opts.includeLogo !== false;
-      const format = opts.imageFormat || 'instagram_square';
+      const format = opts.imageFormat || 'instagram_portrait';
       const company = brandSettings?.companyName || 'the brand';
       const useInsightReport =
         !posterTemplate &&

@@ -16,6 +16,7 @@ import {
 import { preferOriginalLogoUrl } from '../lib/store-upload';
 import { fetchPage } from '../lib/source-grounding';
 import { enforceGrounding } from '../services/grounded-post.service';
+import { formatForPlatforms } from '../providers/images/social-frame';
 
 const MAX_ARTICLE_AGE_DAYS = 14;
 const USED_LOOKBACK_DAYS = 90;
@@ -430,7 +431,7 @@ ${
             logoUrl:
               preferOriginalLogoUrl(brandSettings?.logoUrl) || brandSettings?.logoUrl || null,
             creativeType: 'social',
-            format: 'instagram_square',
+            format: formatForPlatforms(opts.platforms),
             headerText: post.headline,
             footerCta: post.callToAction || null,
             overlay: { overlaysEnabled: true },
@@ -469,7 +470,7 @@ ${
           logoUrl:
             preferOriginalLogoUrl(brandSettings?.logoUrl) || brandSettings?.logoUrl || null,
           creativeType: 'social',
-          format: 'instagram_square',
+          format: formatForPlatforms(opts.platforms),
           headerText: post.headline,
           footerCta: post.callToAction || null,
           overlay: { overlaysEnabled: true },

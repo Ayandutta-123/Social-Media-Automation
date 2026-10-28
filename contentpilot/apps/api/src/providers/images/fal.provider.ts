@@ -305,8 +305,9 @@ export async function generateImageWithOpenAI(
 
   const { width, height } = SOCIAL_IMAGE_FORMATS[format];
   // OpenAI only accepts specific sizes — prefer square for social feed
-  const size =
-    format === 'linkedin' ? '1536x1024' : format === 'story' ? '1024x1536' : '1024x1024';
+  // OpenAI offers three canvases; pick the one closest to the requested aspect.
+  const ratio = width / height;
+  const size = ratio < 0.9 ? '1024x1536' : ratio > 1.1 ? '1536x1024' : '1024x1024';
   const fullPrompt = `${prompt} Target canvas ${width}x${height}.`;
 
   if (model.startsWith('gpt-6-astra')) {
@@ -382,14 +383,7 @@ export async function generateImageWithFalReference(
         image_urls: [referenceImageUrl],
         num_images: 1,
         output_format: 'png',
-        aspect_ratio:
-          format === 'story'
-            ? '9:16'
-            : format === 'instagram_portrait'
-              ? '4:5'
-              : format === 'linkedin'
-                ? '16:9'
-                : '1:1',
+        aspect_ratio: sizeSpec.aspect,
       }
     : {
         prompt,
@@ -398,7 +392,7 @@ export async function generateImageWithFalReference(
         strength: Math.min(0.85, Math.max(0.35, strength)),
         num_images: 1,
         enable_safety_checker: true,
-        image_size: typeof sizeSpec.falSize === 'string' ? sizeSpec.falSize : 'square_hd',
+        image_size: sizeSpec.falSize,
         output_format: 'png',
       };
 

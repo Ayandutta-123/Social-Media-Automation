@@ -43,11 +43,31 @@ type ImageFormat = 'instagram_square' | 'instagram_portrait' | 'linkedin' | 'sto
 type OutputMode = 'auto' | 'text' | 'image';
 type AttachmentRole = 'edit' | 'style' | 'asset';
 
-const IMAGE_FORMATS: Array<{ id: ImageFormat; label: string }> = [
-  { id: 'instagram_square', label: 'IG square' },
-  { id: 'instagram_portrait', label: 'IG portrait' },
-  { id: 'linkedin', label: 'LinkedIn' },
-  { id: 'story', label: 'Story' },
+const IMAGE_FORMATS: Array<{ id: ImageFormat; label: string; size: string; note: string }> = [
+  {
+    id: 'instagram_portrait',
+    label: '4:5 Portrait',
+    size: '1080×1350',
+    note: 'Best for Instagram and Facebook feeds; shown in full on LinkedIn too. Recommended when posting to more than one network.',
+  },
+  {
+    id: 'instagram_square',
+    label: '1:1 Square',
+    size: '1080×1080',
+    note: 'Native on LinkedIn, Instagram and Facebook — never cropped.',
+  },
+  {
+    id: 'linkedin',
+    label: '1.91:1 Landscape',
+    size: '1200×627',
+    note: 'LinkedIn link-style size. Ready-made templates use 1:1 or 4:5, so a template falls back to 1:1.',
+  },
+  {
+    id: 'story',
+    label: '9:16 Story',
+    size: '1080×1920',
+    note: 'Stories and Reels only — not for feed posts. Ready-made templates fall back to 1:1.',
+  },
 ];
 
 type PlaySuggestion = {
@@ -240,7 +260,7 @@ function AiAssistantInner() {
   const [brandKit, setBrandKit] = useState<BrandKitPreview>(FALLBACK_KIT);
   const [posterTemplateId, setPosterTemplateId] = useState<string | null>(null);
   const [includeLogo, setIncludeLogo] = useState(true);
-  const [imageFormat, setImageFormat] = useState<ImageFormat>('instagram_square');
+  const [imageFormat, setImageFormat] = useState<ImageFormat>('instagram_portrait');
   const [referenceUrl, setReferenceUrl] = useState<string | null>(null);
   const [referenceFileName, setReferenceFileName] = useState<string | null>(null);
   const [attachmentRole, setAttachmentRole] = useState<AttachmentRole>('style');
@@ -1232,11 +1252,17 @@ function AiAssistantInner() {
                   onClick={() => setImageFormat(f.id)}
                   className="chip"
                   data-active={imageFormat === f.id}
+                  title={`${f.label} · ${f.size}`}
                 >
                   {f.label}
+                  <span className="ml-1 hidden text-[10px] font-normal opacity-60 sm:inline">{f.size}</span>
                 </button>
               ))}
             </div>
+            <p className="helper-text">
+              {IMAGE_FORMATS.find((f) => f.id === imageFormat)?.note} The photo is created at the shape of its
+              frame and posted exactly as shown — nothing is cropped when it is published.
+            </p>
           </div>
 
           {designSource === 'ai' && (

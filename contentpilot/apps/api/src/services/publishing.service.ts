@@ -44,10 +44,11 @@ class PublishingService {
     let publicCover: string | undefined;
     try {
       if (needsPublicHost) {
-        const hosted = await resolvePublishImageUrls(input.tenantId, [
-          rawCover,
-          ...rawSlides.filter((u) => u !== rawCover),
-        ]);
+        const hosted = await resolvePublishImageUrls(
+          input.tenantId,
+          [rawCover, ...rawSlides.filter((u) => u !== rawCover)],
+          input.platforms,
+        );
         publicCover = hosted[0];
         publicSlides = hosted.length >= 2 ? hosted : hosted[0] ? [hosted[0]] : [];
       } else {

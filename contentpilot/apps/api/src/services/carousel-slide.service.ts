@@ -101,8 +101,8 @@ export async function replaceCarouselSlideImage(opts: {
     layout: (slide.posterLayout as PosterLayoutId) || CAROUSEL_POSTER_LAYOUT,
     slideLabel: `${opts.slideIndex + 1} / ${carousel.slides.length}`,
     contactChips: isLast ? contacts : null,
-    width: SOCIAL_IMAGE_FORMATS.instagram_square.width,
-    height: SOCIAL_IMAGE_FORMATS.instagram_square.height,
+    width: SOCIAL_IMAGE_FORMATS[carousel.format || 'instagram_square'].width,
+    height: SOCIAL_IMAGE_FORMATS[carousel.format || 'instagram_square'].height,
   });
 
   const slides = carousel.slides.map((s, i) =>
@@ -165,7 +165,7 @@ export async function regenerateCarouselSlideArt(opts: {
     creativeType: 'poster',
     posterSpec: nextSpec,
     posterLayout: (slide.posterLayout as PosterLayoutId) || CAROUSEL_POSTER_LAYOUT,
-    format: 'instagram_square',
+    format: carousel.format || 'instagram_square',
     posterQuality: !opts.exact,
     slideLabel: `${opts.slideIndex + 1} / ${carousel.slides.length}`,
     contactChips: isLast ? contacts : null,

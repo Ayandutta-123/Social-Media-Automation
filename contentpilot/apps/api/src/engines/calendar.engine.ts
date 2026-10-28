@@ -16,6 +16,7 @@ import { preferOriginalLogoUrl } from '../lib/store-upload';
 import { generatePosterSpec } from '../services/poster-spec.service';
 import { parseCarouselSlideCount } from '../lib/carousel-parse';
 import { generateCarouselSlides } from '../services/carousel-generate.service';
+import { formatForPlatforms } from '../providers/images/social-frame';
 
 export type CustomCalendarPlanOpts = {
   id?: string;
@@ -451,7 +452,7 @@ ${imagePromptInstruction('the occasion', brandSettings?.imageStyle)}${
         companyName: brandSettings?.companyName,
         logoUrl,
         creativeType: 'social' as const,
-        format: 'instagram_square' as const,
+        format: formatForPlatforms(platforms),
         overlay: { overlaysEnabled: true },
         visualStyleId,
         posterQuality: true,
@@ -462,6 +463,7 @@ ${imagePromptInstruction('the occasion', brandSettings?.imageStyle)}${
         await generateCarouselSlides({
           tenantId,
           contentId,
+          platforms,
           slideCount: carouselCount,
           company,
           brief,
