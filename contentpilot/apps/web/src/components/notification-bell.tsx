@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { Bell, CheckCheck, Trash2, Volume2, VolumeX, X } from 'lucide-react';
 import { useNotifications } from '@/lib/notification-context';
@@ -23,10 +24,25 @@ export function NotificationBell() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  // On phones the panel is a bottom sheet (position: fixed). Inside the blurred sticky header that
+  // would be positioned against the header, not the screen, so render it on <body> instead.
+  const [isPhone, setIsPhone] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const update = () => setIsPhone(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+      if (
+        panelRef.current &&
+        !panelRef.current.contains(e.target as Node) &&
+        !sheetRef.current?.contains(e.target as Node)
+      ) {
         setOpen(false);
         setSelected(new Set());
       }
@@ -95,6 +111,9 @@ export function NotificationBell() {
     setSelected(new Set());
   };
 
+  const withPortal = (node: React.ReactNode) =>
+    isPhone && typeof document !== 'undefined' ? createPortal(node, document.body) : node;
+
   return (
     <div className="relative" ref={panelRef}>
       <button
@@ -116,8 +135,8 @@ export function NotificationBell() {
         )}
       </button>
 
-      {open && (
-        <>
+      {open && withPortal(
+        <div ref={sheetRef} className="contents">
           <button
             type="button"
             aria-label="Close notifications"
@@ -276,7 +295,7 @@ export function NotificationBell() {
               )}
             </div>
           </div>
-        </>
+        </div>,
       )}
     </div>
   );

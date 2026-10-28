@@ -41,7 +41,7 @@ export function ApiKeysBanner() {
   return (
     <Link
       href="/settings?tab=integrations"
-      className="mx-3 mt-3 flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 transition hover:bg-amber-500/15 dark:text-amber-100 sm:mx-4 md:mx-6 xl:mx-8"
+      className="mb-4 flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 transition hover:bg-amber-500/15 dark:text-amber-100"
     >
       <KeyRound size={18} className="mt-0.5 shrink-0" />
       <span>

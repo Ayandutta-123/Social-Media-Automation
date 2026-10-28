@@ -58,7 +58,7 @@ export function Tip({ label, shortcut, children, side = 'bottom', className = ''
   return (
     <span
       ref={wrapRef}
-      className={`inline-flex ${className}`}
+      className={`inline-flex shrink-0 ${className}`}
       onPointerEnter={(e) => {
         if (e.pointerType !== 'touch') show();
       }}

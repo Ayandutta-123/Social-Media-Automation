@@ -73,7 +73,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     document.body.style.overflow = mobileOpen || createOpen ? 'hidden' : '';
+    if (!mobileOpen && !createOpen) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMobileOpen(false);
+        setCreateOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
     return () => {
+      window.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
     };
   }, [mobileOpen, createOpen]);
@@ -116,10 +125,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
           </div>
         </header>
-        <main className="min-h-0 flex-1 overflow-auto pb-[env(safe-area-inset-bottom,0px)]">
-          <ApiKeysBanner />
-          {children}
-        </main>
+        <main className="min-h-0 flex-1 overflow-auto pb-[env(safe-area-inset-bottom,0px)]">{children}</main>
       </div>
     );
   }

@@ -150,7 +150,7 @@ function PostLinks({ links }: { links: PostLink[] }) {
                   ? `Open this post on ${label} (${link.accountName})`
                   : `Open this post on ${label}`
               }
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-2.5 py-1.5 text-xs font-semibold transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-500/40 hover:text-brand-600 hover:shadow-sm"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-3 py-1.5 text-xs font-semibold transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-500/40 hover:text-brand-600 hover:shadow-sm sm:min-h-[36px] sm:px-2.5"
             >
               <PlatformIcon platform={link.platform} size={14} />
               <span>View on {label}</span>
@@ -570,7 +570,7 @@ export default function DashboardPage() {
                           setNotice('');
                           setRepublishing(post);
                         }}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-brand-700"
+                        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-brand-700 sm:min-h-[36px] sm:px-3"
                       >
                         <Repeat2 size={14} />
                         Republish

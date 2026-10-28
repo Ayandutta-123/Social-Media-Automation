@@ -1103,6 +1103,44 @@
   .prompt-popup-foot {
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
   }
+
+  /* iOS Safari zooms the whole page when a focused field is under 16px — keep every field at 16px. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* Sliders: a 20px thumb is too small for a finger. */
+  input[type='range'].range {
+    height: 1.75rem;
+    background: transparent;
+  }
+  input[type='range'].range::-webkit-slider-thumb {
+    height: 1.75rem;
+    width: 1.75rem;
+    margin-top: -0.625rem;
+  }
+  input[type='range'].range::-moz-range-thumb {
+    height: 1.75rem;
+    width: 1.75rem;
+  }
+
+  /* Small text links and chips: grow the tap area without moving the layout. */
+  main a.underline,
+  main button.underline {
+    padding-block: 0.5rem;
+    margin-block: -0.5rem;
+  }
+  main button[class*='rounded-full'][class*='text-[11px]'] {
+    min-height: 36px;
+  }
+
+  /* Nothing in the content area should be smaller than 11px on a phone. */
+  main [class*='text-[10px]'],
+  main [class*='text-[9px]'] {
+    font-size: 11px;
+  }
 }
 
 /* Touch devices: kill sticky :hover lifts that leave buttons “stuck up” after tap */

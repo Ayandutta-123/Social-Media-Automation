@@ -1171,7 +1171,7 @@ export function InhouseTemplateEditor({
                   >
                     <button
                       type="button"
-                      className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[11px]"
+                      className="flex min-h-[36px] min-w-0 flex-1 items-center gap-1.5 text-left text-[11px] lg:min-h-0"
                       onClick={() => setSelectedId(layer.id)}
                     >
                       {layer.type === 'text' ? (
@@ -1412,7 +1412,8 @@ export function InhouseTemplateEditor({
                           key={handle.id}
                           type="button"
                           aria-label={`Resize ${handle.id}`}
-                          className={`absolute ${handle.className} h-2.5 w-2.5 border border-white bg-brand-600 shadow`}
+                          // before: widens the touch target to ~34px without changing how the handle looks
+                          className={`absolute ${handle.className} h-2.5 w-2.5 border border-white bg-brand-600 shadow before:absolute before:-inset-3 before:content-['']`}
                           style={{ cursor: handle.cursor }}
                           onPointerDown={(event) => beginPointer(event, layer, 'resize', handle.id)}
                         />
@@ -1437,7 +1438,7 @@ export function InhouseTemplateEditor({
                   <button
                     key={mode}
                     type="button"
-                    className={`px-2 py-1.5 capitalize ${
+                    className={`min-h-[40px] px-2 py-1.5 capitalize lg:min-h-0 ${
                       (canvas.backgroundMode || 'static') === mode
                         ? mode === 'dynamic'
                           ? 'bg-brand-500/10 text-brand-700 dark:text-brand-300'

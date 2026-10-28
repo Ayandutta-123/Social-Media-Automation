@@ -868,9 +868,16 @@ const DESIGNS: Record<string, DesignFn> = {
     let y = pad + 96 * u;
     if (num) {
       const nf = fit(num, { w: W * 0.4, h: H * 0.22, max: 280 * u, min: 60, weight: 900, maxLines: 1, lh: 0.9 });
-      out += textBlock(nf.lines, pad, y - 10 * u, { size: nf.size, weight: 900, fill: c.accent, font: ctx.headFont, lh: 0.9 });
-      out += k.headline(pad + nf.lines.join('').length * nf.size * 0.62 + 26 * u, y + 14 * u, { w: W - pad * 2 - nf.lines.join('').length * nf.size * 0.62 - 26 * u, h: nf.h, max: 62 * u, maxLines: 3 }).svg;
-      y += nf.h + 14 * u;
+      // Heavy numerals are not all the same width ("%" is far wider than a digit), so measure the glyphs
+      // instead of assuming 0.62em each, and keep the number to about a third of the width so the
+      // headline beside it stays readable.
+      const glyphEm = [...nf.lines.join('')].reduce((w, ch) => w + (/[0-9]/.test(ch) ? 0.66 : ch === '%' ? 1.05 : /[.,:]/.test(ch) ? 0.34 : 0.78), 0);
+      const numSize = Math.min(nf.size, (W * 0.36) / Math.max(glyphEm, 0.5));
+      const numW = glyphEm * numSize;
+      const numH = nf.h * (numSize / nf.size);
+      out += textBlock(nf.lines, pad, y - 10 * u, { size: numSize, weight: 900, fill: c.accent, font: ctx.headFont, lh: 0.9 });
+      out += k.headline(pad + numW + 26 * u, y + 14 * u, { w: W - pad * 2 - numW - 26 * u, h: Math.max(numH, 150 * u), max: 62 * u, maxLines: 3 }).svg;
+      y += numH + 14 * u;
     } else {
       const hl = k.headline(pad, y, { w: W - pad * 2, h: H * 0.3, max: 88 * u, maxLines: 4 });
       out += hl.svg;
