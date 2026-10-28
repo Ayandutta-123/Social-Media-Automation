@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
+import { consumeDestination } from '@/lib/post-login';
 import { PasswordInput } from '@/components/password-input';
 import { APP_NAME, APP_TAGLINE } from '@/lib/brand';
 import { InlineNotice, LoadingState, ProcessingButton } from '@/components/ui';
@@ -22,7 +23,7 @@ export default function LoginPage() {
       router.replace('/choose-company');
       return;
     }
-    router.replace('/dashboard');
+    router.replace(consumeDestination());
   }, [loading, user, router]);
 
   if (loading || user) {
@@ -46,7 +47,7 @@ export default function LoginPage() {
         if (next.needsCompanyChoice) {
           router.push('/choose-company');
         } else {
-          router.push('/dashboard');
+          router.push(consumeDestination());
         }
       } else {
         await api('/auth/register', {

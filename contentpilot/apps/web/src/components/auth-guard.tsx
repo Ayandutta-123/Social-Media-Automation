@@ -3,6 +3,7 @@
 import { useAuth } from '@/lib/auth-context';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
+import { rememberDestination } from '@/lib/post-login';
 import { AppShell } from '@/components/app-shell';
 import { LoadingState } from '@/components/ui';
 
@@ -12,6 +13,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!loading && !user) {
+      rememberDestination(`${window.location.pathname}${window.location.search}`);
       router.push('/');
     }
   }, [user, loading, router]);

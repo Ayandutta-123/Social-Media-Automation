@@ -300,3 +300,38 @@ export async function resolvePublishImageUrls(
   }
   return out;
 }
+
+/**
+ * Chat clients (Teams, Slack) cannot render SVG posters or localhost URLs. Rasterise to a
+ * 1080px JPEG, store it under /uploads and return its public URL. Returns undefined when the
+ * image cannot be rendered or the API has no public HTTPS address.
+ */
+export async function createPublicPreviewJpeg(
+  tenantId: string,
+  url: string | null | undefined,
+  maxWidth = 1080,
+): Promise<string | undefined> {
+  const raw = (url || '').trim();
+  if (!raw) return undefined;
+  // Already a normal public raster image — use as is.
+  if (isExternallyReachableHttps(raw) && !/\.svg(\?|$)/i.test(raw)) return raw;
+  try {
+    const loaded = await loadImageBytesForPublish(raw);
+    if (!loaded) return undefined;
+    const jpeg = await toInstagramJpeg(loaded);
+    const buffer = await sharp(jpeg.buffer, { failOn: 'none' })
+      .resize({ width: maxWidth, withoutEnlargement: true })
+      .jpeg({ quality: 88, mozjpeg: true })
+      .toBuffer();
+    const filename = `preview-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    const publicUrl = toPublicMediaUrl(`/uploads/${tenantId}/previews/${filename}`);
+    if (!publicUrl || !isExternallyReachableHttps(publicUrl)) return undefined;
+    const dir = path.resolve(config.UPLOAD_DIR, tenantId, 'previews');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, filename), buffer);
+    return publicUrl;
+  } catch (err) {
+    console.warn('[Notification] preview image failed', err instanceof Error ? err.message : err);
+    return undefined;
+  }
+}

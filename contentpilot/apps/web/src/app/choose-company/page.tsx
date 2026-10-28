@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth-context';
 import { ProcessingButton, InlineNotice } from '@/components/ui';
 import { notifyError, notifySuccess } from '@/lib/toast';
 import { APP_NAME } from '@/lib/brand';
+import { consumeDestination } from '@/lib/post-login';
 
 export default function ChooseCompanyPage() {
   const { user, companies, switchCompany, createCompany, loading } = useAuth();
@@ -21,7 +22,7 @@ export default function ChooseCompanyPage() {
 
   useEffect(() => {
     if (!loading && user && companies.length === 1 && !user.needsCompanyChoice) {
-      router.replace('/dashboard');
+      router.replace(consumeDestination());
     }
   }, [loading, user, companies, router]);
 
@@ -31,7 +32,7 @@ export default function ChooseCompanyPage() {
     try {
       await switchCompany(tenantId);
       notifySuccess('Company opened');
-      window.location.assign('/dashboard');
+      window.location.assign(consumeDestination());
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Could not open company';
       setError(msg);

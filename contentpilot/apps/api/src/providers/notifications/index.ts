@@ -3,6 +3,8 @@ import { resolveProviders } from '../../services/providers.service';
 import { prisma } from '../../lib/prisma';
 import { asStringArray } from '../../lib/json';
 import { toPublicMediaUrl } from '../../lib/public-media-url';
+import { createPublicPreviewJpeg } from '../../lib/publishable-image';
+import { extractCarouselPayload } from '../../lib/carousel-parse';
 
 export interface NotificationAction {
   label: string;
@@ -102,41 +104,146 @@ export class SlackNotificationProvider implements NotificationProvider {
   }
 }
 
-/** Microsoft Teams Incoming Webhook / Workflows connector (MessageCard). */
+/** Legacy Office 365 connector URLs still speak MessageCard; everything else (Workflows) needs Adaptive Cards. */
+function isLegacyTeamsConnector(url: string): boolean {
+  return /\.webhook\.office\.com\//i.test(url) || /outlook\.office\.com\/webhook/i.test(url);
+}
+
+type AdaptiveElement = Record<string, unknown>;
+
+/** Slack-style `*bold*` → Teams markdown `**bold**` (leaves existing `**` alone). */
+function toTeamsMarkdown(text: string): string {
+  return text.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1**$2**');
+}
+
+/**
+ * Turn the Slack-flavoured body (`*Label*` headings + text lines) into wrapping Adaptive Card
+ * blocks. Every block uses `wrap: true` so nothing clips or overlaps on mobile.
+ */
+function bodyToAdaptiveBlocks(body: string, skipFirstLine?: string): AdaptiveElement[] {
+  const blocks: AdaptiveElement[] = [];
+  const lines = body.split('\n');
+  let first = true;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (first) {
+      first = false;
+      if (skipFirstLine && line.replace(/\*/g, '') === skipFirstLine) continue;
+    }
+    if (!line) continue;
+    const label = /^\*([^*]+)\*:?$/.exec(line);
+    if (label) {
+      blocks.push({
+        type: 'TextBlock',
+        text: label[1].toUpperCase(),
+        size: 'Small',
+        weight: 'Bolder',
+        color: 'Accent',
+        spacing: 'Medium',
+        wrap: true,
+      });
+      continue;
+    }
+    blocks.push({
+      type: 'TextBlock',
+      text: toTeamsMarkdown(line),
+      wrap: true,
+      spacing: 'Small',
+      isSubtle: /^#/.test(line),
+    });
+  }
+  return blocks;
+}
+
+/** Microsoft Teams Workflows webhook (Adaptive Card) with legacy MessageCard fallback. */
 export class TeamsNotificationProvider implements NotificationProvider {
   readonly name = 'teams';
 
   constructor(private readonly webhookUrl?: string) {}
 
-  async send(payload: NotificationPayload): Promise<void> {
-    const url = this.webhookUrl || appConfig.TEAMS_WEBHOOK_URL;
-    if (!url) {
-      console.warn('[Notification] Teams webhook not configured, skipping');
-      return;
-    }
-
-    const sections: Record<string, unknown>[] = [
+  private buildAdaptive(
+    payload: NotificationPayload,
+    accent: 'Accent' | 'Good' | 'Warning' | 'Attention',
+    severityIcon?: string,
+  ): Record<string, unknown> {
+    const company = payload.metadata?.company;
+    const title = `${severityIcon ? `${severityIcon} ` : ''}${payload.title}`;
+    const body: AdaptiveElement[] = [
       {
-        activityTitle: payload.title,
-        text: payload.body.replace(/\*/g, '**'),
+        type: 'Container',
+        style: accent === 'Attention' ? 'attention' : accent === 'Warning' ? 'warning' : accent === 'Good' ? 'good' : 'accent',
+        bleed: true,
+        items: [
+          {
+            type: 'TextBlock',
+            text: title,
+            size: 'Large',
+            weight: 'Bolder',
+            wrap: true,
+          },
+        ],
       },
     ];
 
     if (payload.imageUrl) {
-      sections.push({
-        images: [{ image: payload.imageUrl, title: 'Preview' }],
+      body.push({
+        type: 'Image',
+        url: payload.imageUrl,
+        size: 'Stretch',
+        altText: 'Post preview',
+        spacing: 'Medium',
+        selectAction: resolveActions(payload)[0]
+          ? { type: 'Action.OpenUrl', url: resolveActions(payload)[0].url }
+          : undefined,
       });
     }
 
+    body.push(...bodyToAdaptiveBlocks(payload.body, company));
+
+    const actions = resolveActions(payload)
+      .slice(0, 6)
+      .map((a) => ({
+        type: 'Action.OpenUrl',
+        title: a.label,
+        url: a.url,
+        style: a.style === 'primary' ? 'positive' : a.style === 'danger' ? 'destructive' : 'default',
+      }));
+
+    return {
+      type: 'message',
+      attachments: [
+        {
+          contentType: 'application/vnd.microsoft.card.adaptive',
+          contentUrl: null,
+          content: {
+            $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+            type: 'AdaptiveCard',
+            version: '1.4',
+            msteams: { width: 'Full' },
+            fallbackText: payload.title,
+            body,
+            ...(actions.length ? { actions } : {}),
+          },
+        },
+      ],
+    };
+  }
+
+  private buildLegacy(
+    payload: NotificationPayload,
+    themeColor: string,
+    title: string,
+  ): Record<string, unknown> {
+    const sections: Record<string, unknown>[] = [{ text: toTeamsMarkdown(payload.body).replace(/\n/g, '\n\n') }];
+    if (payload.imageUrl) sections.push({ images: [{ image: payload.imageUrl, title: 'Preview' }] });
     const card: Record<string, unknown> = {
       '@type': 'MessageCard',
       '@context': 'https://schema.org/extensions',
       summary: payload.title,
-      themeColor: '6264A7',
-      title: payload.title,
+      themeColor,
+      title,
       sections,
     };
-
     const actions = resolveActions(payload);
     if (actions.length) {
       card.potentialAction = actions.map((a) => ({
@@ -145,64 +252,54 @@ export class TeamsNotificationProvider implements NotificationProvider {
         targets: [{ os: 'default', uri: a.url }],
       }));
     }
+    return card;
+  }
+
+  private async post(
+    payload: NotificationPayload,
+    accent: 'Accent' | 'Good' | 'Warning' | 'Attention',
+    themeColor: string,
+    icon?: string,
+  ): Promise<void> {
+    const url = this.webhookUrl || appConfig.TEAMS_WEBHOOK_URL;
+    if (!url) {
+      console.warn('[Notification] Teams webhook not configured, skipping');
+      return;
+    }
+    const title = `${icon ? `${icon} ` : ''}${payload.title}`;
+    const card = isLegacyTeamsConnector(url)
+      ? this.buildLegacy(payload, themeColor, title)
+      : this.buildAdaptive(payload, accent, icon);
 
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(card),
     });
-
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       console.warn(`[Notification] Teams webhook failed (${res.status}): ${text.slice(0, 200)}`);
     }
   }
 
+  async send(payload: NotificationPayload): Promise<void> {
+    await this.post(payload, 'Accent', '6264A7');
+  }
+
   async sendAlert(payload: NotificationPayload & { severity: 'error' | 'warning' | 'info' }): Promise<void> {
+    const accent = { error: 'Attention', warning: 'Warning', info: 'Accent' }[payload.severity] as
+      | 'Attention'
+      | 'Warning'
+      | 'Accent';
     const themeColor = { error: 'D13438', warning: 'FFB900', info: '0078D4' }[payload.severity];
-    const emoji = { error: '🚨', warning: '⚠️', info: 'ℹ️' }[payload.severity];
-    const url = this.webhookUrl || appConfig.TEAMS_WEBHOOK_URL;
-    if (!url) {
-      console.warn('[Notification] Teams webhook not configured, skipping');
-      return;
-    }
-
-    const card: Record<string, unknown> = {
-      '@type': 'MessageCard',
-      '@context': 'https://schema.org/extensions',
-      summary: payload.title,
-      themeColor,
-      title: `${emoji} ${payload.title}`,
-      sections: [{ text: payload.body.replace(/\*/g, '**') }],
-    };
-
+    const icon = { error: '🚨', warning: '⚠️', info: 'ℹ️' }[payload.severity];
     const actions = resolveActions(payload);
-    if (actions.length) {
-      card.potentialAction = actions.map((a) => ({
-        '@type': 'OpenUri',
-        name: a.label,
-        targets: [{ os: 'default', uri: a.url }],
-      }));
-    } else if (payload.actionUrl) {
-      card.potentialAction = [
-        {
-          '@type': 'OpenUri',
-          name: 'View Logs',
-          targets: [{ os: 'default', uri: payload.actionUrl }],
-        },
-      ];
-    }
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(card),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      console.warn(`[Notification] Teams webhook failed (${res.status}): ${text.slice(0, 200)}`);
-    }
+    const withFallback: NotificationPayload = actions.length
+      ? payload
+      : payload.actionUrl
+        ? { ...payload, actions: [{ label: 'View Logs', url: payload.actionUrl }] }
+        : payload;
+    await this.post(withFallback, accent, themeColor, icon);
   }
 }
 
@@ -495,6 +592,18 @@ export function buildPlatformPostUrl(
   }
 }
 
+/** Chat-safe preview: SVG posters / local files become a public 1080px JPEG. */
+async function chatPreviewUrl(tenantId: string | undefined, imageUrl?: string | null): Promise<string | undefined> {
+  if (!imageUrl?.trim()) return undefined;
+  if (tenantId) {
+    const rendered = await createPublicPreviewJpeg(tenantId, imageUrl);
+    if (rendered) return rendered;
+  }
+  // Never hand chat clients an SVG — it shows as a broken image.
+  const fallback = absolutePreviewUrl(imageUrl);
+  return fallback && !/\.svg(\?|$)/i.test(fallback) ? fallback : undefined;
+}
+
 export async function notifyApprovalPending(content: {
   id: string;
   tenantId?: string;
@@ -502,14 +611,17 @@ export async function notifyApprovalPending(content: {
   body: string;
   hashtags?: unknown;
   imageUrl?: string | null;
+  templateSlots?: unknown;
 }): Promise<void> {
   const company = await resolveCompanyName(content.tenantId);
   const base = `${appConfig.WEB_URL}/approvals/${content.id}`;
   const caption = formatCaption(content.headline, content.body);
   const hashtags = formatHashtags(content.hashtags);
 
+  const slideCount = extractCarouselPayload(content.templateSlots)?.slides.length ?? 0;
   const body = [
     `*${company}*`,
+    ...(slideCount > 1 ? ['', `*Format*`, `Carousel · ${slideCount} slides (cover shown) — open to review every slide`] : []),
     '',
     '*Caption*',
     caption,
@@ -521,11 +633,11 @@ export async function notifyApprovalPending(content: {
   await sendChatNotification(content.tenantId, {
     title: `${company} · Ready for review`,
     body,
-    imageUrl: absolutePreviewUrl(content.imageUrl),
+    imageUrl: await chatPreviewUrl(content.tenantId, content.imageUrl),
     actions: [
-      { label: 'Post to social', url: `${base}?action=post`, style: 'primary' },
-      { label: 'Reject', url: `${base}?action=reject`, style: 'danger' },
-      { label: 'Open in Approvals', url: base },
+      { label: 'Review & post', url: `${base}?action=post`, style: 'primary' },
+      { label: 'Request changes', url: `${base}?action=reject`, style: 'danger' },
+      { label: 'Open in ContentPilot', url: base },
     ],
     metadata: { contentId: content.id, company },
   });
@@ -582,7 +694,7 @@ export async function notifyPublished(input: {
   await sendChatNotification(input.tenantId, {
     title: `${company} · Posted successfully`,
     body,
-    imageUrl: absolutePreviewUrl(input.imageUrl),
+    imageUrl: await chatPreviewUrl(input.tenantId, input.imageUrl),
     actions: [
       {
         label: 'Open in ContentPilot',
