@@ -167,6 +167,8 @@ export async function regenerateCarouselSlideArt(opts: {
     posterLayout: (slide.posterLayout as PosterLayoutId) || CAROUSEL_POSTER_LAYOUT,
     format: carousel.format || 'instagram_square',
     posterQuality: !opts.exact,
+    // Same look for the whole carousel, but a different reference picture per slide.
+    dnaImageSeed: `${opts.contentId}:${opts.slideIndex}`,
     slideLabel: `${opts.slideIndex + 1} / ${carousel.slides.length}`,
     contactChips: isLast ? contacts : null,
     companyName: brand?.companyName,

@@ -95,6 +95,12 @@ export type AttachImageOpts = {
   artFormat?: SocialImageFormat;
   /** Use the prompt exactly — do not force a default photo style */
   exact?: boolean;
+  /** img2img strength for a reference image; the poster-DNA step sets this for "Strong match". */
+  referenceStrength?: number;
+  /** Seed for choosing the reference image inside a look; carousels pass one per slide so slides differ. */
+  dnaImageSeed?: string;
+  /** Apply the learned brand look to a raw-art call (attachGeneratedImage already does it for AI posters). */
+  brandDna?: boolean;
   brandImageStyle?: string | null;
   companyName?: string | null;
   logoUrl?: string | null;
@@ -307,22 +313,32 @@ export async function generateRawArtUrl(
   const providers = await resolveProviders(tenantId);
   const brand = await prisma.brandSettings.findUnique({ where: { tenantId } });
   let guidedPrompt = imagePrompt.trim();
-  try {
-    const { resolvePosterVisualGuidance } = await import('./brand-poster-reference.service');
-    const guidance = await resolvePosterVisualGuidance({
-      tenantId,
-      seed: contentId,
-      hasExplicitReference: Boolean(opts.referenceImageUrl),
-      designSource: opts.designSource,
-    });
-    if (guidance.styleInstruction) {
-      guidedPrompt = `${guidedPrompt}\n\n${guidance.styleInstruction}`;
+  // Memes, Brand Studio plates and edits must not inherit the poster look, and attachGeneratedImage has
+  // already added it for AI posters — so raw art only gets it when the caller asks (opts.brandDna).
+  if (opts.brandDna) {
+    try {
+      const { resolvePosterVisualGuidance } = await import('./brand-poster-reference.service');
+      const guidance = await resolvePosterVisualGuidance({
+        tenantId,
+        seed: contentId,
+        hasExplicitReference: Boolean(opts.referenceImageUrl),
+        designSource: opts.designSource,
+        topicHint: opts.dnaImageSeed ? undefined : imagePrompt,
+        imageSeed: opts.dnaImageSeed,
+      });
+      if (guidance.styleInstruction) {
+        guidedPrompt = `${guidedPrompt}\n\n${guidance.styleInstruction}`;
+      }
+      if (!opts.referenceImageUrl && guidance.referenceImageUrl) {
+        opts = {
+          ...opts,
+          referenceImageUrl: guidance.referenceImageUrl,
+          referenceStrength: opts.referenceStrength ?? guidance.referenceStrength,
+        };
+      }
+    } catch (error) {
+      console.warn('[brand-visual-dna] could not resolve raw-art references', error);
     }
-    if (!opts.referenceImageUrl && guidance.referenceImageUrl) {
-      opts = { ...opts, referenceImageUrl: guidance.referenceImageUrl };
-    }
-  } catch (error) {
-    console.warn('[brand-visual-dna] could not resolve raw-art references', error);
   }
 
   const styleLine = resolveVisualStylePrompt(
@@ -357,7 +373,7 @@ export async function generateRawArtUrl(
     format,
     exact: true,
     referenceImageUrl: opts.referenceImageUrl || undefined,
-    referenceStrength: opts.referenceImageUrl ? 0.58 : undefined,
+    referenceStrength: opts.referenceImageUrl ? opts.referenceStrength ?? 0.58 : undefined,
     editMode: opts.editMode === true,
   });
   await executionLogService.log({
@@ -399,12 +415,19 @@ export async function attachGeneratedImage(
         seed: contentId,
         hasExplicitReference: Boolean(opts.referenceImageUrl),
         designSource: opts.designSource,
+        // Carousels keep one look across slides, so they are not re-matched per slide prompt.
+        topicHint: opts.dnaImageSeed ? undefined : cleanPrompt,
+        imageSeed: opts.dnaImageSeed,
       });
       if (guidance.styleInstruction) {
         cleanPrompt = `${cleanPrompt}\n\n${guidance.styleInstruction}`;
       }
       if (!opts.referenceImageUrl && guidance.referenceImageUrl) {
-        opts = { ...opts, referenceImageUrl: guidance.referenceImageUrl };
+        opts = {
+          ...opts,
+          referenceImageUrl: guidance.referenceImageUrl,
+          referenceStrength: opts.referenceStrength ?? guidance.referenceStrength,
+        };
       }
     } catch (error) {
       console.warn('[brand-visual-dna] could not resolve poster references', error);
@@ -544,7 +567,7 @@ export async function attachGeneratedImage(
           format,
           exact: true,
           referenceImageUrl: opts.referenceImageUrl || undefined,
-          referenceStrength: opts.referenceImageUrl ? 0.7 : undefined,
+          referenceStrength: opts.referenceImageUrl ? opts.referenceStrength ?? 0.7 : undefined,
           negativePrompt:
             opts.negativePrompt ||
             'misspelled text, garbled letters, fake logos, invented brand marks, watermarks, low-res typography, cluttered collage, dashed logo boxes, LOGO placeholder',
@@ -706,7 +729,7 @@ export async function attachGeneratedImage(
       format: artFormat,
       exact: true,
       referenceImageUrl: opts.referenceImageUrl || undefined,
-      referenceStrength: opts.referenceImageUrl ? 0.55 : undefined,
+      referenceStrength: opts.referenceImageUrl ? opts.referenceStrength ?? 0.55 : undefined,
       editMode: opts.editMode === true,
       negativePrompt: opts.negativePrompt || opts.posterSpec?.artNegativePrompt || undefined,
     });

@@ -310,6 +310,8 @@ Produce ${slideCount} slides. imagePrompt = photography only; layout id is separ
           contentBrief: `${slide.headline} — ${input.post.body.slice(0, 180)}`.slice(0, 420),
           savePrompt: false,
           skipPersist: true,
+          // Same look for the whole carousel, a different reference picture per slide.
+          dnaImageSeed: `${input.contentId}:${i}`,
         },
       );
       if (!attached?.imageUrl) {

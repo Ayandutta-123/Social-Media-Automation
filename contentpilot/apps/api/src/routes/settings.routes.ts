@@ -485,6 +485,7 @@ export async function settingsRoutes(app: FastifyInstance) {
         mimetype: data.mimetype,
         logLabel: 'brand-poster-reference',
       });
+      let referenceSaved = false;
       try {
         const { analyzeBrandReferenceImage } = await import('../services/reference-style.service');
         const analysis = await analyzeBrandReferenceImage(tenantId, stored.publicUrl);
@@ -510,13 +511,16 @@ export async function settingsRoutes(app: FastifyInstance) {
           },
           { isolationLevel: 'Serializable' },
         );
+        referenceSaved = true;
         const { refreshPosterVisualProfile } = await import(
           '../services/brand-poster-reference.service'
         );
-        const visualProfile = await refreshPosterVisualProfile(tenantId);
+        // The summary text is informational; the reference itself is already saved.
+        const visualProfile = await refreshPosterVisualProfile(tenantId).catch(() => '');
         return { success: true, data: { reference, visualProfile } };
       } catch (err) {
-        await fs.unlink(stored.absolutePath).catch(() => undefined);
+        // Once the row is saved the file is in use; only a failed analysis/save should remove it.
+        if (!referenceSaved) await fs.unlink(stored.absolutePath).catch(() => undefined);
         if (err instanceof Error && err.message === 'POSTER_REFERENCE_LIMIT') {
           return reply.status(409).send({
             success: false,

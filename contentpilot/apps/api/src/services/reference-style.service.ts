@@ -271,6 +271,18 @@ export async function analyzeBrandReferenceImage(
   tenantId: string,
   referenceImageUrl: string,
 ): Promise<BrandVisualAnalysis> {
+  // A refusal or truncated reply must not be stored as "style" — it would feed junk into every post.
+  let lastRaw = '';
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    lastRaw = await visionRawForReference(tenantId, referenceImageUrl);
+    if (looksLikeVisualAnalysis(lastRaw)) return parseBrandVisualAnalysis(lastRaw);
+  }
+  throw new Error(
+    `The model could not read this image as a poster style (${lastRaw.replace(/\s+/g, ' ').slice(0, 90) || 'empty reply'}). Try a clearer image.`,
+  );
+}
+
+async function visionRawForReference(tenantId: string, referenceImageUrl: string): Promise<string> {
   const providers = await resolveProviders(tenantId);
   const dataUri = await resolveReferenceDataUri(referenceImageUrl);
   let raw = '';
@@ -299,7 +311,18 @@ export async function analyzeBrandReferenceImage(
     throw new Error('No LLM API key available to analyze the brand reference image.');
   }
 
-  return parseBrandVisualAnalysis(raw);
+  return raw;
+}
+
+/** True when the vision reply really is an art-direction card (not a refusal or cut-off JSON). */
+export function looksLikeVisualAnalysis(raw: string): boolean {
+  try {
+    const obj = parseJsonObjectLenient(raw) as Record<string, unknown>;
+    const block = String(obj.imagePromptBlock || obj.narrativeBrief || '');
+    return block.trim().length >= 40 && typeof obj.medium === 'string' && obj.medium.trim().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**

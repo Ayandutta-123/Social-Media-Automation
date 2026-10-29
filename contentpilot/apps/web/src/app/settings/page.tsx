@@ -708,7 +708,7 @@ function ProfileSettings() {
       .finally(() => setBrandLoaded(true));
   }, []);
 
-  const loadPosterReferences = async () => {
+  const loadPosterReferences = async (opts: { syncMode?: boolean } = {}) => {
     try {
       const res = await api<{
         data: {
@@ -719,15 +719,38 @@ function ProfileSettings() {
       }>('/settings/brand/poster-references');
       setPosterReferences(res.data.references || []);
       setPosterReferencesMax(res.data.max || 20);
-      setForm((current) => ({ ...current, posterReferenceMode: res.data.mode || 'off' }));
+      // Only the first load reads the mode. Refreshing after an upload or delete used to snap the
+      // radio back to the saved value, silently undoing a choice the user had just made.
+      if (opts.syncMode) {
+        setForm((current) => ({ ...current, posterReferenceMode: res.data.mode || 'off' }));
+      }
     } catch {
       // Brand settings may not exist yet.
     }
   };
 
   useEffect(() => {
-    void loadPosterReferences();
+    void loadPosterReferences({ syncMode: true });
   }, []);
+
+  /** The reference mode takes effect on the next post, so save it the moment it is chosen. */
+  const changePosterReferenceMode = async (mode: 'off' | 'guide' | 'strong') => {
+    const previous = form.posterReferenceMode;
+    setForm((current) => ({ ...current, posterReferenceMode: mode }));
+    try {
+      await api('/settings/brand', { method: 'PUT', body: { posterReferenceMode: mode, scrapeWebsite: false } });
+      notifySuccess(
+        mode === 'off'
+          ? 'Poster references are off'
+          : mode === 'guide'
+            ? 'AI will be guided by your approved posters'
+            : 'AI will match your approved posters closely',
+      );
+    } catch (e) {
+      setForm((current) => ({ ...current, posterReferenceMode: previous }));
+      notifyError(e instanceof Error ? e.message : 'Could not save the reference mode');
+    }
+  };
 
   // One-time "Scrape now" after creating a company (?scrapePrompt=1)
   useEffect(() => {
@@ -989,29 +1012,45 @@ function ProfileSettings() {
     notifySuccess('Detected values applied for review');
   };
 
+  const [referenceProgress, setReferenceProgress] = useState('');
+
   const uploadPosterReference = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files || []);
     event.target.value = '';
-    if (!file) return;
-    if (posterReferences.length >= posterReferencesMax) {
+    if (!files.length) return;
+    const room = posterReferencesMax - posterReferences.length;
+    if (room <= 0) {
       notifyError(`You can upload up to ${posterReferencesMax} approved posters.`);
       return;
     }
-    setReferenceBusy(true);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      await apiUpload('/settings/brand/poster-references', fd);
-      await loadPosterReferences();
-      notifySuccess('Poster analyzed and added to your visual DNA');
-    } catch (e) {
-      notifyError(e instanceof Error ? e.message : 'Poster analysis failed');
-    } finally {
-      setReferenceBusy(false);
+    const batch = files.slice(0, room);
+    if (files.length > room) {
+      notifyError(`Only ${room} more poster${room === 1 ? '' : 's'} fit — adding the first ${room}.`);
     }
+    setReferenceBusy(true);
+    let added = 0;
+    const failures: string[] = [];
+    // One at a time: each upload is analysed by the AI, and the server enforces the 20-poster limit.
+    for (let i = 0; i < batch.length; i++) {
+      setReferenceProgress(batch.length > 1 ? `Analysing ${i + 1} of ${batch.length}…` : 'Analysing…');
+      try {
+        const fd = new FormData();
+        fd.append('file', batch[i]);
+        await apiUpload('/settings/brand/poster-references', fd);
+        added += 1;
+      } catch (e) {
+        failures.push(`${batch[i].name}: ${e instanceof Error ? e.message : 'analysis failed'}`);
+      }
+    }
+    await loadPosterReferences();
+    setReferenceBusy(false);
+    setReferenceProgress('');
+    if (added) notifySuccess(`${added} poster${added === 1 ? '' : 's'} analysed and added to your visual DNA`);
+    if (failures.length) notifyError(failures.join(' · ').slice(0, 300));
   };
 
   const removePosterReference = async (id: string) => {
+    if (!window.confirm('Remove this poster from your visual DNA? New posts will stop following it.')) return;
     setReferenceBusy(true);
     try {
       await api(`/settings/brand/poster-references/${id}`, { method: 'DELETE' });
@@ -1533,7 +1572,7 @@ function ProfileSettings() {
             <div>
               <p className="font-semibold text-slate-900 dark:text-slate-100">Approved poster visual DNA</p>
               <p className="mt-1 max-w-2xl text-xs leading-relaxed text-[hsl(var(--muted-foreground))]">
-                Add 8–20 approved creatives. Each upload is parsed in detail (medium, palette, lighting,
+                Add up to 20 approved creatives (8+ works best; you can select several at once). Each upload is parsed in detail (medium, palette, lighting,
                 camera, layout, finish) and grouped into <strong>varieties</strong>. New posts pick one
                 variety — mixed libraries no longer get blended into a single mush. This does not train a
                 model and does not alter Brand Studio templates.
@@ -1547,16 +1586,11 @@ function ProfileSettings() {
           <div className="mt-4">
             <ChoiceCards
               value={form.posterReferenceMode}
-              onChange={(id) =>
-                setForm({
-                  ...form,
-                  posterReferenceMode: id as 'off' | 'guide' | 'strong',
-                })
-              }
+              onChange={(id) => void changePosterReferenceMode(id as 'off' | 'guide' | 'strong')}
               options={[
                 { id: 'off', label: 'Off', hint: 'Do not use poster references' },
-                { id: 'guide', label: 'Guide AI', hint: 'One variety per post, fresh layout' },
-                { id: 'strong', label: 'Strong match', hint: 'Same variety + img2img from that family' },
+                { id: 'guide', label: 'Guide AI', hint: 'Follows the look in words; fresh layout' },
+                { id: 'strong', label: 'Strong match', hint: 'Also starts from one of your posters (image-to-image)' },
               ]}
             />
           </div>
@@ -1565,6 +1599,7 @@ function ProfileSettings() {
             ref={posterReferenceInput}
             type="file"
             accept="image/png,image/jpeg,image/webp"
+            multiple
             className="hidden"
             onChange={(event) => void uploadPosterReference(event)}
           />
@@ -1575,7 +1610,7 @@ function ProfileSettings() {
             onClick={() => posterReferenceInput.current?.click()}
           >
             {referenceBusy ? <Spinner size={16} /> : <Upload size={15} />}
-            Add approved poster
+            {referenceBusy && referenceProgress ? referenceProgress : 'Add approved posters'}
           </button>
 
           {posterReferences.length > 0 ? (
@@ -1632,8 +1667,8 @@ function ProfileSettings() {
         </div>
 
         <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
-          Click Save brand kit below. Already-generated posts keep their old plate until you open
-          them in Approvals and reframe.
+          The poster-reference mode is saved as soon as you pick it. Colours and fonts need Save brand kit.
+          Already-generated posts keep their old plate until you open them in Approvals and reframe.
         </p>
         <SectionSaveBar
           label="Save brand kit"

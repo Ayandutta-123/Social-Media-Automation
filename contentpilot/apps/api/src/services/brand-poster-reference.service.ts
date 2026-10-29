@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { BRAND_DNA_MARKER } from '../providers/images/social-frame';
 import {
   analysisFromLegacyBrief,
   formatVisualAnalysisForPrompt,
@@ -112,9 +113,72 @@ export function aggregatePosterStyleBriefs(references: StoredReference[]): strin
   ].join('\n');
 }
 
+export { BRAND_DNA_MARKER };
+
+const STOP_WORDS = new Set(
+  'the a an and or of for to in on with at by from as is are be this that it its your our their into over under about'.split(' '),
+);
+
+function wordsOf(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 3 && !STOP_WORDS.has(w)),
+  );
+}
+
+/** Pick the variety whose subject/mood best fits the post; ties (and no hint) fall back to a stable hash. */
+function pickCluster<T extends { analysis: BrandVisualAnalysis; label: string }>(
+  clusters: T[],
+  seed: string,
+  topicHint?: string,
+): T {
+  const fallback = clusters[stableIndex(seed, clusters.length)];
+  if (!topicHint || clusters.length < 2) return fallback;
+  const topic = wordsOf(topicHint);
+  if (!topic.size) return fallback;
+  let best = fallback;
+  let bestScore = 0;
+  let tie = false;
+  for (const cluster of clusters) {
+    const a = cluster.analysis;
+    const vocab = wordsOf(`${cluster.label} ${a.subjectArchetype} ${a.mood} ${a.medium}`);
+    let score = 0;
+    for (const w of vocab) if (topic.has(w)) score += 1;
+    if (score > bestScore) {
+      best = cluster;
+      bestScore = score;
+      tie = false;
+    } else if (score === bestScore && score > 0) {
+      tie = true;
+    }
+  }
+  return bestScore > 0 && !tie ? best : fallback;
+}
+
+/** One compact block (~700 chars): enough to steer the model, short enough to survive prompt limits. */
+function compactDna(a: BrandVisualAnalysis): string {
+  return [
+    `${a.varietyLabel}: ${a.medium}, ${a.mood}.`,
+    `Palette: ${a.colorPalette.dominant.slice(0, 3).join(', ')}${
+      a.colorPalette.accents.length ? `; accents ${a.colorPalette.accents.slice(0, 2).join(', ')}` : ''
+    }; ground ${a.colorPalette.background}; ${a.colorPalette.contrast} contrast.`,
+    `Light: ${a.lighting}.`,
+    `Camera: ${a.composition.camera}; ${a.composition.layout}; depth ${a.composition.depth}.`,
+    `Finish: ${a.textureFinish}.`,
+    `Keep: ${a.doKeep.slice(0, 4).join('; ')}.`,
+  ]
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .slice(0, 760);
+}
+
 export function buildVarietyInstruction(
   references: StoredReference[],
   seed: string,
+  opts: { topicHint?: string; imageSeed?: string } = {},
 ): {
   styleInstruction: string;
   varietyKey: string;
@@ -124,23 +188,15 @@ export function buildVarietyInstruction(
   if (!clusters.length) {
     return { styleInstruction: '', varietyKey: '', members: [] };
   }
-  const picked = clusters[stableIndex(seed, clusters.length)];
-  const primary = analysisOf(picked.members[stableIndex(seed + ':img', picked.members.length)]);
-  const alt = picked.members
-    .filter((_, i) => i !== stableIndex(seed + ':img', picked.members.length))
-    .slice(0, 1)
-    .map((m) => analysisOf(m));
+  const picked = pickCluster(clusters, seed, opts.topicHint);
+  const imageSeed = opts.imageSeed || seed;
+  const primary = analysisOf(picked.members[stableIndex(`${imageSeed}:img`, picked.members.length)]);
 
   const styleInstruction = [
-    `USE THIS VARIETY ONLY — ${picked.label} (${picked.key}). Do not mix in other brand looks from the library.`,
-    formatVisualAnalysisForPrompt(primary),
-    alt.length
-      ? `Sibling in the same variety (same family, different angle — do not copy): ${alt[0].imagePromptBlock}`
-      : '',
-    'New subject for THIS post. Same medium, palette, lighting, camera language, finish. Leave room for a new headline.',
-  ]
-    .filter(Boolean)
-    .join('\n');
+    `${BRAND_DNA_MARKER} — use this look only (${picked.key}); do not mix in other looks.`,
+    compactDna(primary),
+    'New subject for THIS post. Never reproduce readable text, logos or faces from the references.',
+  ].join(' ');
 
   return { styleInstruction, varietyKey: picked.key, members: picked.members };
 }
@@ -174,8 +230,15 @@ export async function resolvePosterVisualGuidance(opts: {
   seed: string;
   /** Exact story/competitor/meme/user reference must remain authoritative. */
   hasExplicitReference?: boolean;
-  /** Fixed template plates must never be modified by learned style. */
+  /**
+   * Brand Studio plates are fixed and never touched by learned style. ContentPilot layouts ('template')
+   * keep their drawn design, but the photo inside them still follows the look (text guidance only).
+   */
   designSource?: 'template' | 'brand_template' | 'ai' | null;
+  /** The post's scene / topic — used to pick the variety that fits it. */
+  topicHint?: string;
+  /** Picks the reference image inside the variety; carousels pass a per-slide seed so slides differ. */
+  imageSeed?: string;
 }): Promise<{
   mode: PosterReferenceMode;
   styleInstruction: string;
@@ -192,7 +255,6 @@ export async function resolvePosterVisualGuidance(opts: {
   if (
     mode === 'off' ||
     opts.hasExplicitReference ||
-    opts.designSource === 'template' ||
     opts.designSource === 'brand_template'
   ) {
     return { mode, styleInstruction: '', referenceImageUrl: null };
@@ -215,25 +277,23 @@ export async function resolvePosterVisualGuidance(opts: {
     return { mode, styleInstruction: '', referenceImageUrl: null };
   }
 
-  const picked = buildVarietyInstruction(references, opts.seed);
+  const picked = buildVarietyInstruction(references, opts.seed, {
+    topicHint: opts.topicHint,
+    imageSeed: opts.imageSeed,
+  });
   const strengthNote =
     mode === 'strong'
-      ? 'STRONG — this must look like the next creative in the SAME variety (not a blend of the whole library).'
-      : 'GUIDE — keep this variety recognizable, but allow a fresh composition.';
-  const catalogNote =
-    clusterPosterVarieties(references).length > 1
-      ? `Library has ${clusterPosterVarieties(references).length} varieties; this post uses only “${picked.varietyKey}”.`
-      : '';
-  const styleInstruction = [picked.styleInstruction, catalogNote, `Match strength: ${strengthNote}`]
-    .filter(Boolean)
-    .join('\n');
+      ? 'Match closely: it should read as the next creative in this same look.'
+      : 'Keep the look recognisable, but allow a fresh composition.';
+  const styleInstruction = `${picked.styleInstruction} ${strengthNote}`;
 
-  if (mode !== 'strong' || opts.hasExplicitReference) {
+  // Image-to-image from a whole poster only suits a full AI poster, not the photo slot of a drawn layout.
+  if (mode !== 'strong' || opts.designSource === 'template') {
     return { mode, styleInstruction, referenceImageUrl: null };
   }
 
   const pool = picked.members.length ? picked.members : references;
-  const selected = pool[stableIndex(opts.seed, pool.length)].imageUrl;
+  const selected = pool[stableIndex(`${opts.imageSeed || opts.seed}:img`, pool.length)].imageUrl;
   const publicUrl = resolveReferencePublicUrl(selected);
   const referenceImageUrl = /localhost|127\.0\.0\.1/.test(publicUrl)
     ? await resolveReferenceDataUri(selected).catch(() => null)
