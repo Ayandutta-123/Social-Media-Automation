@@ -14,6 +14,28 @@ export type CarouselSlide = {
   posterLayout?: string | null;
 };
 
+/** What a carousel that stopped part-way keeps, so a retry can continue instead of starting over. */
+export type CarouselProgress = {
+  /** Slides the finished carousel will have. */
+  total: number;
+  /** Slides already made, in order. */
+  slides: CarouselSlide[];
+  /** The plan for every slide (wording, art prompt, layout) — reused so a retry keeps the same words. */
+  planned: Array<{
+    headline: string;
+    imagePrompt: string;
+    layout: string;
+    spec: Record<string, unknown>;
+  }>;
+  layouts: string[];
+  contacts?: unknown;
+  format?: string;
+  /** Inputs needed to carry on (brand, style, platforms, …). */
+  resume: Record<string, unknown>;
+  /** Present once a slide failed. */
+  failure?: { slide: number; message: string; at: string; attempts: number };
+};
+
 export type CarouselPayload = {
   slideCount: number;
   slides: CarouselSlide[];
@@ -133,4 +155,19 @@ export function mergeTemplateSlots(
     base[k] = v;
   }
   return base;
+}
+
+/** The unfinished-carousel record, if this post stopped part-way. */
+export function extractCarouselProgress(templateSlots: unknown): CarouselProgress | null {
+  if (!templateSlots || typeof templateSlots !== 'object' || Array.isArray(templateSlots)) return null;
+  const raw = (templateSlots as Record<string, unknown>).carouselProgress;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const p = raw as Partial<CarouselProgress>;
+  if (!Array.isArray(p.planned) || !Array.isArray(p.slides) || typeof p.total !== 'number') return null;
+  return p as CarouselProgress;
+}
+
+/** True while a carousel is missing slides — it must not be approved, posted or edited as if it were whole. */
+export function hasIncompleteCarousel(templateSlots: unknown): boolean {
+  return extractCarouselProgress(templateSlots) !== null;
 }

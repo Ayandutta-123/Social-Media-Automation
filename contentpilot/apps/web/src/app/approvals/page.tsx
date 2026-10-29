@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
 import { api } from '@/lib/api';
 import {
-  Ban, CheckCircle, Clock, Eye, Image as ImageIcon, Loader2, Trash2,
+  Ban, CheckCircle, Clock, Eye, Image as ImageIcon, Loader2, RefreshCw, Trash2,
 } from 'lucide-react';
 import { InlineNotice, ProcessingButton, Skeleton } from '@/components/ui';
 
@@ -21,6 +21,8 @@ interface PendingItem {
   createdAt: string;
   sourceReference: string | null;
   publishError?: string | null;
+  /** Set while a carousel is missing slides. */
+  carouselProgress?: { total: number; done: number; failure: { slide: number } | null } | null;
 }
 
 function statusBadgeClass(status: string) {
@@ -49,6 +51,31 @@ export default function ApprovalsPage() {
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false));
   }, [reload]);
+
+  // Keep the list fresh while something is being made (e.g. a carousel finishing its missing slides).
+  const anyGenerating = items.some((item) => item.status === 'generating');
+  useEffect(() => {
+    if (!anyGenerating) return;
+    const timer = window.setInterval(() => void reload().catch(() => undefined), 4000);
+    return () => window.clearInterval(timer);
+  }, [anyGenerating, reload]);
+
+  const retryCarouselItem = async (id: string, e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setBusyId(id);
+    setError('');
+    setOkMsg('');
+    try {
+      await api(`/content/${id}/retry-carousel`, { method: 'POST' });
+      setOkMsg('Continuing the carousel — finished slides are kept.');
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not retry the carousel');
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const abortItem = async (id: string, e: MouseEvent) => {
     e.preventDefault();
@@ -192,7 +219,11 @@ export default function ApprovalsPage() {
                         <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
                           <span className="status-badge-engine capitalize">{item.engine}</span>
                           <span className={`${statusBadgeClass(item.status)} capitalize`}>
-                            {item.status === 'failed' ? 'publish failed' : item.status.replace(/_/g, ' ')}
+                            {item.status === 'failed'
+                              ? item.carouselProgress
+                                ? 'carousel incomplete'
+                                : 'failed'
+                              : item.status.replace(/_/g, ' ')}
                           </span>
                           {item.revisionCount > 0 && (
                             <span className="status-badge-muted">Rev. {item.revisionCount}</span>
@@ -204,6 +235,12 @@ export default function ApprovalsPage() {
                         <p className="mt-1 line-clamp-2 text-xs text-[hsl(var(--muted-foreground))]">
                           {item.body || 'No caption yet'}
                         </p>
+                        {item.carouselProgress && (
+                          <p className="mt-1 text-xs font-medium text-red-700 dark:text-red-300">
+                            {item.carouselProgress.done} of {item.carouselProgress.total} slides ready
+                            {item.carouselProgress.failure ? ` · slide ${item.carouselProgress.failure.slide} failed` : ''}
+                          </p>
+                        )}
                         <div className="mt-2 flex items-center gap-1.5 text-[11px] text-[hsl(var(--muted-foreground))]">
                           <Clock size={12} />
                           {new Date(item.createdAt).toLocaleString()}
@@ -211,9 +248,23 @@ export default function ApprovalsPage() {
                       </div>
                     </div>
                     <div className="pointer-events-auto mt-3 flex flex-wrap gap-2 border-t border-[hsl(var(--border))] pt-3">
-                      <Link href={`/approvals/${item.id}`} className="btn-primary btn-sm flex-1 sm:flex-none">
+                      {item.carouselProgress && item.status === 'failed' && (
+                        <button
+                          type="button"
+                          className="btn-primary btn-sm flex-1 sm:flex-none"
+                          disabled={busy || clearing}
+                          onClick={(e) => void retryCarouselItem(item.id, e)}
+                        >
+                          {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                          Retry missing slides
+                        </button>
+                      )}
+                      <Link
+                        href={`/approvals/${item.id}`}
+                        className={`btn-sm flex-1 sm:flex-none ${item.carouselProgress && item.status === 'failed' ? 'btn-secondary' : 'btn-primary'}`}
+                      >
                         <Eye size={13} />
-                        Review
+                        {item.carouselProgress && item.status === 'failed' ? 'Details' : 'Review'}
                       </Link>
                       <button
                         type="button"

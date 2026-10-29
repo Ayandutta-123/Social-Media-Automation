@@ -9,7 +9,7 @@ import { ContentEngine, ExecutionStatus } from '@contentpilot/shared';
 import { asStringArray } from '../lib/json';
 import { notifySuccess, notifyError } from './app-notification.service';
 import { captionForPlatform } from './platform-captions';
-import { extractCarouselPayload } from '../lib/carousel-parse';
+import { extractCarouselPayload, hasIncompleteCarousel } from '../lib/carousel-parse';
 import { toPublicMediaUrl } from '../lib/public-media-url';
 import { resolvePublishImageUrls } from '../lib/publishable-image';
 import type { PublishContent } from '../providers/publishing/publishing.interface';
@@ -25,6 +25,17 @@ class PublishingService {
     const content = await prisma.generatedContent.findUniqueOrThrow({
       where: { id: input.contentId },
     });
+
+    // Never post half a carousel.
+    if (hasIncompleteCarousel(content.templateSlots)) {
+      const msg = 'This carousel is missing slides, so it was not posted. Retry the missing slides in Approvals first.';
+      await prisma.generatedContent.update({
+        where: { id: input.contentId },
+        data: { status: 'failed', publishError: msg },
+      });
+      await notifyError(input.tenantId, 'Not posted — carousel incomplete', msg, `/approvals/${input.contentId}`);
+      return;
+    }
 
     await prisma.generatedContent.update({
       where: { id: input.contentId },

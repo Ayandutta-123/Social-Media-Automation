@@ -4,6 +4,7 @@ import { ContentEngine, ExecutionStatus, ApprovalAction, UserRole } from '@conte
 import { prisma } from '../lib/prisma';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { enqueueContentGeneration, enqueuePublishing } from '../workers';
+import { carouselCompleteGuard } from '../middleware/carousel-complete';
 import { approvalService } from '../services/approval.service';
 import { getRotationStatus } from '../services/rotation.service';
 import { executionLogService } from '../services/execution-log.service';
@@ -1561,7 +1562,20 @@ export async function contentRoutes(app: FastifyInstance) {
 
   app.get('/pending', { preHandler: requireAuth }, async (request) => {
     const items = await approvalService.getPendingApprovals(request.session.tenantId!);
-    return { success: true, data: items };
+    const { extractCarouselProgress } = await import('../lib/carousel-parse');
+    return {
+      success: true,
+      data: items.map((item) => {
+        const progress = extractCarouselProgress(item.templateSlots);
+        return {
+          ...item,
+          // Small summary for the list; the full plan stays on the server.
+          carouselProgress: progress
+            ? { total: progress.total, done: progress.slides.length, failure: progress.failure ?? null }
+            : null,
+        };
+      }),
+    };
   });
 
   app.post('/pending/clear', { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) }, async (request) => {
@@ -1570,6 +1584,20 @@ export async function contentRoutes(app: FastifyInstance) {
       reviewerId: request.session.userId!,
     });
     return { success: true, data: result };
+  });
+
+  /** Carry on with a carousel that stopped part-way: keeps finished slides and wording, makes only the missing ones. */
+  app.post('/:id/retry-carousel', { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { retryCarousel } = await import('../services/carousel-retry.service');
+    try {
+      const data = await retryCarousel(request.session.tenantId!, id);
+      return { success: true, data };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not retry the carousel.';
+      const status = /not found/i.test(message) ? 404 : 409;
+      return reply.status(status).send({ success: false, error: message });
+    }
   });
 
   app.post('/:id/abort', { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) }, async (request, reply) => {
@@ -1773,7 +1801,7 @@ export async function contentRoutes(app: FastifyInstance) {
   });
 
   /** Upload an image into a dynamic template image slot and re-render. */
-  app.post('/:id/upload-slot-image', { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) }, async (request, reply) => {
+  app.post('/:id/upload-slot-image', { preHandler: [requireRole(UserRole.ADMIN, UserRole.REVIEWER), carouselCompleteGuard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const data = await request.file();
     if (!data) return reply.status(400).send({ success: false, error: 'No file uploaded' });
@@ -1850,7 +1878,7 @@ export async function contentRoutes(app: FastifyInstance) {
   /** Replace one carousel slide's hero photo (upload from laptop); keeps typography. */
   app.post(
     '/:id/carousel-slide/:slideIndex/replace-image',
-    { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) },
+    { preHandler: [requireRole(UserRole.ADMIN, UserRole.REVIEWER), carouselCompleteGuard] },
     async (request, reply) => {
       const { id, slideIndex } = request.params as { id: string; slideIndex: string };
       const idx = Number(slideIndex);
@@ -1888,7 +1916,7 @@ export async function contentRoutes(app: FastifyInstance) {
   /** Regenerate ONLY the hero art for one carousel slide via prompt. */
   app.post(
     '/:id/carousel-slide/:slideIndex/regenerate-art',
-    { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) },
+    { preHandler: [requireRole(UserRole.ADMIN, UserRole.REVIEWER), carouselCompleteGuard] },
     async (request, reply) => {
       const { id, slideIndex } = request.params as { id: string; slideIndex: string };
       const idx = Number(slideIndex);
@@ -1929,7 +1957,7 @@ export async function contentRoutes(app: FastifyInstance) {
     },
   );
 
-  app.post('/:id/regenerate-image', { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) }, async (request, reply) => {
+  app.post('/:id/regenerate-image', { preHandler: [requireRole(UserRole.ADMIN, UserRole.REVIEWER), carouselCompleteGuard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = z
       .object({
@@ -2300,7 +2328,7 @@ export async function contentRoutes(app: FastifyInstance) {
   });
 
   /** Re-apply logo + text overlays without regenerating AI art */
-  app.post('/:id/reframe-image', { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) }, async (request, reply) => {
+  app.post('/:id/reframe-image', { preHandler: [requireRole(UserRole.ADMIN, UserRole.REVIEWER), carouselCompleteGuard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = z
       .object({
@@ -2357,7 +2385,7 @@ export async function contentRoutes(app: FastifyInstance) {
     return { success: true, data: updated };
   });
 
-  app.post('/:id/approve', { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) }, async (request, reply) => {
+  app.post('/:id/approve', { preHandler: [requireRole(UserRole.ADMIN, UserRole.REVIEWER), carouselCompleteGuard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = z.object({
       action: z.nativeEnum(ApprovalAction),

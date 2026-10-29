@@ -106,6 +106,13 @@ interface ContentDetail {
       rawImageUrl?: string | null;
     }>;
   } | null;
+  /** Set while a carousel is missing slides: finished slides are kept and Retry makes only the rest. */
+  carouselProgress?: {
+    total: number;
+    done: number;
+    slides: Array<{ index: number; headline: string; imageUrl: string }>;
+    failure: { slide: number; message: string; at: string; attempts: number } | null;
+  } | null;
   templateLayers: TemplateLayer[];
   templateName: string | null;
   connectedPlatforms: ConnectedPlatform[];
@@ -308,6 +315,7 @@ export default function ApprovalDetailPage() {
   const [downloading, setDownloading] = useState(false);
   const [calendarGone, setCalendarGone] = useState<CalendarDraftGone | null>(null);
   const [regenerating, setRegenerating] = useState(false);
+  const [carouselRetrying, setCarouselRetrying] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const activeCaption = editedCaptions[captionTab];
@@ -396,6 +404,22 @@ export default function ApprovalDetailPage() {
     setCalendarGone(null);
     applyContent(res.data);
     return res.data;
+  };
+
+  const retryCarousel = async () => {
+    setCarouselRetrying(true);
+    setError('');
+    try {
+      await api(`/content/${id}/retry-carousel`, { method: 'POST' });
+      notifySuccess('Continuing the carousel');
+      await reload();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Could not retry the carousel';
+      setError(msg);
+      notifyError(msg);
+    } finally {
+      setCarouselRetrying(false);
+    }
   };
 
   const regenerateCalendarDraft = async (entry: CalendarDraftGone) => {
@@ -966,7 +990,15 @@ export default function ApprovalDetailPage() {
     );
   }
 
-  const reviewing = canReview(content.status);
+  const incompleteCarousel = content.carouselProgress ?? null;
+  // A carousel with missing slides cannot be approved, edited or posted until it is finished.
+  const reviewing = canReview(content.status) && !incompleteCarousel;
+  // Short, plain summary first; the long technical text stays one tap away.
+  const [rawSummary, rawDetail] = (content.publishError || '').split(/\n?Technical detail:\s*/);
+  const sentences = (rawSummary || '').split(/(?<=[.!?])\s+/);
+  const longSummary = !rawDetail && sentences.length > 2;
+  const errorSummary = longSummary ? sentences.slice(0, 2).join(' ') : rawSummary;
+  const errorDetail = longSummary ? sentences.slice(2).join(' ') : rawDetail;
 
   return (
     <AuthGuard>
@@ -983,7 +1015,7 @@ export default function ApprovalDetailPage() {
                     : 'status-badge-pending capitalize'
                 }
               >
-                {content.status.replace(/_/g, ' ')}
+                {incompleteCarousel && content.status === 'failed' ? 'carousel incomplete' : content.status.replace(/_/g, ' ')}
               </span>
               {content.revisionCount > 0 && (
                 <span className="status-badge-muted">Revision {content.revisionCount}</span>
@@ -999,14 +1031,59 @@ export default function ApprovalDetailPage() {
           </div>
         </div>
 
-        {content.status === 'failed' && (
+        {incompleteCarousel && content.status === 'failed' && (
+          <div className="rounded-2xl border border-red-500/30 bg-red-500/[0.06] p-4" role="alert">
+            <p className="text-sm font-semibold text-red-800 dark:text-red-200">
+              Carousel not finished — {incompleteCarousel.done} of {incompleteCarousel.total} slides ready
+            </p>
+            <p className="mt-1 text-sm leading-relaxed">
+              {errorSummary ||
+                `Slide ${incompleteCarousel.failure?.slide ?? incompleteCarousel.done + 1} could not be made.`}
+            </p>
+            {errorDetail && (
+              <details className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
+                <summary className="min-h-[32px] cursor-pointer py-1 font-medium">Technical detail</summary>
+                <p className="mt-1 break-words">{errorDetail}</p>
+              </details>
+            )}
+            {incompleteCarousel.slides.length > 0 && (
+              <ul className="mt-3 grid grid-cols-5 gap-2 sm:grid-cols-8" aria-label="Slides already saved">
+                {incompleteCarousel.slides.map((slide) => (
+                  <li key={slide.index} className="relative overflow-hidden rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--muted))]">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={slide.imageUrl} alt={`Slide ${slide.index}`} className="aspect-[4/5] w-full object-cover" />
+                    <span className="absolute left-1 top-1 rounded bg-black/65 px-1 text-[10px] font-bold text-white">{slide.index}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <ProcessingButton
+                variant="primary"
+                className="min-h-[44px] w-full sm:w-auto"
+                loading={carouselRetrying}
+                loadingText="Starting…"
+                icon={<RefreshCw size={15} />}
+                onClick={() => void retryCarousel()}
+              >
+                Retry missing slides ({incompleteCarousel.total - incompleteCarousel.done})
+              </ProcessingButton>
+              <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                Keeps the {incompleteCarousel.done} saved slide{incompleteCarousel.done === 1 ? '' : 's'} and the same wording. Posting is switched off until every slide is done.
+              </span>
+            </div>
+          </div>
+        )}
+        {!incompleteCarousel && content.status === 'failed' && (
           <InlineNotice kind="error">
             Publishing failed and nothing was posted{content.publishError ? `: ${content.publishError}` : '.'} Fix the issue, then use Post to social media to retry.
           </InlineNotice>
         )}
         {content.status === 'generating' && (
           <InlineNotice kind="info">
-            Still generating caption and image… this page refreshes automatically. Use Abort on the overlay to cancel.
+            {incompleteCarousel
+              ? `Making the missing slides… ${incompleteCarousel.done} of ${incompleteCarousel.total} ready. This page refreshes automatically.`
+              : 'Still generating caption and image… this page refreshes automatically. Use Abort on the overlay to cancel.'}
           </InlineNotice>
         )}
         {chatAction === 'post' || chatAction === 'reject' ? (

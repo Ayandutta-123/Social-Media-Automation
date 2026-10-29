@@ -2,6 +2,7 @@ import { ContentEngine } from '@contentpilot/shared';
 import { prisma } from '../lib/prisma';
 import { wallClockInZoneToUtc, isValidTimeHm } from '../lib/timezone-wallclock';
 import { VISUAL_STYLE_PRESETS } from '../providers/images/social-frame';
+import { hasIncompleteCarousel } from '../lib/carousel-parse';
 
 const DEFAULT_VISUAL_STYLE_ID = 'professional_photo';
 
@@ -367,9 +368,16 @@ export async function generateManualPlanEntry(
   const linked = entry.contentId
     ? await prisma.generatedContent.findFirst({
         where: { id: entry.contentId },
-        select: { id: true, deletedAt: true, status: true },
+        select: { id: true, deletedAt: true, status: true, templateSlots: true },
       })
     : null;
+
+  // A carousel that stopped part-way keeps its finished slides: continue it instead of starting over.
+  if (linked && !linked.deletedAt && linked.status === 'failed' && hasIncompleteCarousel(linked.templateSlots)) {
+    const { retryCarousel } = await import('./carousel-retry.service');
+    await retryCarousel(tenantId, linked.id);
+    return linked.id;
+  }
   const linkedGone =
     !linked || Boolean(linked.deletedAt) || GONE_DRAFT_STATUSES.has(linked.status);
 
@@ -648,4 +656,18 @@ export async function markPlanEntryFromGeneration(
         : { errorMessage: null }),
     },
   });
+}
+
+/** Same as markPlanEntryFromGeneration, for a retry that only knows the draft (not the calendar entry). */
+export async function markPlanEntryByContentId(
+  contentId: string,
+  outcome: 'ready' | 'failed',
+  errorMessage?: string,
+) {
+  const entry = await prisma.contentCalendarPlanEntry.findFirst({
+    where: { contentId },
+    select: { id: true },
+  });
+  if (!entry) return;
+  await markPlanEntryFromGeneration(entry.id, contentId, outcome, errorMessage);
 }

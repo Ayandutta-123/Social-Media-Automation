@@ -14,7 +14,7 @@ import {
 } from './content-template.service';
 import { isLayerDynamic } from '../providers/templates/brand-renderer';
 import { formatForPlatforms } from '../providers/images/social-frame';
-import { extractCarouselPayload } from '../lib/carousel-parse';
+import { extractCarouselPayload, extractCarouselProgress } from '../lib/carousel-parse';
 import type { PosterSpec } from '../providers/images/poster-frame';
 
 interface ProcessApprovalInput {
@@ -655,6 +655,18 @@ Generate an improved version that specifically addresses that request.`,
       ...content,
       templateSlots: slotsFromJson(content.templateSlots),
       carousel: extractCarouselPayload(content.templateSlots),
+      /** Set while a carousel is missing slides (see carousel-retry.service). */
+      carouselProgress: (() => {
+        const progress = extractCarouselProgress(content.templateSlots);
+        return progress
+          ? {
+              total: progress.total,
+              done: progress.slides.length,
+              slides: progress.slides.map((s) => ({ index: s.index, headline: s.headline, imageUrl: s.imageUrl })),
+              failure: progress.failure ?? null,
+            }
+          : null;
+      })(),
       templateLayers: loaded ? describeTemplateLayers(loaded.canvas) : [],
       templateName: loaded?.templateName || content.brandTemplate?.name || null,
       connectedPlatforms: connections,

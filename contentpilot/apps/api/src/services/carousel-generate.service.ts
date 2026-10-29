@@ -3,14 +3,17 @@ import { formatForPlatforms, SOCIAL_IMAGE_FORMATS, type SocialImageFormat } from
 import { prisma } from '../lib/prisma';
 import { LLMService } from './llm.service';
 import { executionLogService } from './execution-log.service';
-import { assertGenerationActive } from './generation-abort.service';
+import { assertGenerationActive, isGenerationAbortedError } from './generation-abort.service';
 import { preferOriginalLogoUrl } from '../lib/store-upload';
 import { posterSpecFromJson, POSTER_ART_NEGATIVE } from './poster-spec.service';
 import { POSTER_ICON_IDS, type PosterLayoutId, type PosterSpec } from '../providers/images/poster-frame';
 import {
   clampSlideCount,
+  extractCarouselProgress,
+  type CarouselProgress,
   type CarouselSlide,
 } from '../lib/carousel-parse';
+import { toProviderCreditError } from '../lib/provider-credits';
 import {
   buildBrandContactChips,
   formatBrandContactLine,
@@ -81,6 +84,84 @@ export type GenerateCarouselSlidesResult = {
  */
 export const CAROUSEL_POSTER_LAYOUT = 'hero_right' as const;
 
+/** Plain-English reason for an image-service failure (the raw text is kept as "technical detail"). */
+export function describeImageFailure(raw: string): string {
+  // The app wraps provider errors in long advice ("Add a fal.ai API key…"); judge the actual last attempt first.
+  const core = /last high-end attempt[^:]*failed:\s*([\s\S]*)$/i.exec(raw)?.[1] || '';
+  return (core && classifyImageFailure(core)) || classifyImageFailure(raw) || 'the image service returned an error';
+}
+
+function classifyImageFailure(text: string): string | null {
+  const t = text.toLowerCase();
+  // Setup problems first: they are the ones the user can fix.
+  if (/api key|unauthori[sz]ed|forbidden|\b40[13]\b|not configured|add a .{0,24}key|no .{0,20}key/.test(t)) {
+    return 'the image service is not set up (missing or rejected key)';
+  }
+  if (/nsfw|safety|policy|moderation|content.?filter|blocked|flagged/.test(t)) {
+    return 'the image service refused the picture (content filter)';
+  }
+  if (/429|rate.?limit|too many requests|busy|overload|capacity|\b50[234]\b|unavailable/.test(t)) {
+    return 'the image service was busy';
+  }
+  if (/timeout|timed out|etimedout|econnreset|socket hang up|network|fetch failed/.test(t)) {
+    return 'the image service timed out';
+  }
+  if (/failed to generate|returned nothing|no image/.test(t)) {
+    return 'the image service returned no picture';
+  }
+  return null;
+}
+
+/** A carousel stopped at one slide. Earlier slides are already saved on the post. */
+export class CarouselSlideError extends Error {
+  readonly slide: number;
+  readonly total: number;
+  readonly saved: number;
+  readonly technical: string;
+
+  constructor(slide: number, total: number, saved: number, cause: unknown) {
+    const technical = (cause instanceof Error ? cause.message : String(cause)).replace(/\s+/g, ' ').trim();
+    const summary = `Slide ${slide} of ${total} failed — ${describeImageFailure(technical)}. ${saved} of ${total} slide${saved === 1 ? ' is' : 's are'} saved; Retry continues from slide ${slide}.`;
+    super(`${summary}\nTechnical detail: ${technical.slice(0, 300)}`);
+    this.name = 'CarouselSlideError';
+    this.slide = slide;
+    this.total = total;
+    this.saved = saved;
+    this.technical = technical;
+  }
+}
+
+type PlannedSlide = {
+  headline: string;
+  imagePrompt: string;
+  spec: PosterSpec;
+  layout: PosterLayoutId;
+};
+
+type CarouselPlan = {
+  slideCount: number;
+  planned: PlannedSlide[];
+  layouts: PosterLayoutId[];
+  postFormat: SocialImageFormat;
+};
+
+function slotsObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? { ...(value as Record<string, unknown>) } : {};
+}
+
+/** Write the progress record onto the post (keeps every other template slot as it is). */
+async function saveProgress(contentId: string, progress: CarouselProgress): Promise<void> {
+  const row = await prisma.generatedContent.findUnique({ where: { id: contentId }, select: { templateSlots: true } });
+  await prisma.generatedContent.update({
+    where: { id: contentId },
+    data: {
+      templateSlots: { ...slotsObject(row?.templateSlots), carouselProgress: progress } as object,
+      // The first finished slide doubles as the thumbnail while the rest is pending.
+      ...(progress.slides[0] ? { imageUrl: progress.slides[0].imageUrl } : {}),
+    },
+  });
+}
+
 /**
  * Outline N designed-poster slides via LLM, render each with a VARIED layout
  * (not always hero_right), and store cover + templateSlots.carousel.
@@ -88,6 +169,54 @@ export const CAROUSEL_POSTER_LAYOUT = 'hero_right' as const;
 export async function generateCarouselSlides(
   input: GenerateCarouselSlidesInput,
 ): Promise<GenerateCarouselSlidesResult> {
+  const plan = await buildCarouselPlan(input);
+  if (input.persist !== false) {
+    // Save the plan before the first picture, so a failure part-way can be retried without redoing the words.
+    const { tenantId: _t, contentId: _c, ...resume } = input;
+    void _t;
+    void _c;
+    await saveProgress(input.contentId, {
+      total: plan.slideCount,
+      slides: [],
+      planned: plan.planned as unknown as CarouselProgress['planned'],
+      layouts: plan.layouts,
+      format: plan.postFormat,
+      resume: JSON.parse(JSON.stringify(resume)) as Record<string, unknown>,
+    });
+  }
+  return renderCarouselSlides(input, plan, []);
+}
+
+/** Continue a carousel that stopped part-way: keeps finished slides and the same wording. */
+export async function resumeCarouselSlides(
+  tenantId: string,
+  contentId: string,
+): Promise<GenerateCarouselSlidesResult> {
+  const row = await prisma.generatedContent.findFirst({
+    where: { id: contentId, tenantId, deletedAt: null },
+    select: { templateSlots: true },
+  });
+  const progress = extractCarouselProgress(row?.templateSlots);
+  if (!progress) throw new Error('This post has no unfinished carousel to continue.');
+  const input = { ...(progress.resume as unknown as GenerateCarouselSlidesInput), tenantId, contentId };
+  const plan: CarouselPlan = {
+    slideCount: progress.total,
+    planned: progress.planned as unknown as PlannedSlide[],
+    layouts: progress.layouts as PosterLayoutId[],
+    postFormat: (progress.format as SocialImageFormat) || formatForPlatforms(input.platforms || []),
+  };
+  await executionLogService.log({
+    tenantId,
+    contentId,
+    workflowStep: input.workflowStep || 'carousel:slides',
+    engine: input.engine || ContentEngine.CALENDAR,
+    message: `Continuing carousel from slide ${progress.slides.length + 1} of ${progress.total} (${progress.slides.length} already saved)`,
+  });
+  return renderCarouselSlides(input, plan, progress.slides, progress.failure?.attempts ?? 0);
+}
+
+/** The words and layouts for every slide (one AI call). */
+async function buildCarouselPlan(input: GenerateCarouselSlidesInput): Promise<CarouselPlan> {
   const slideCount = clampSlideCount(input.slideCount);
   const llm = await LLMService.forTenant(input.tenantId);
   const { attachGeneratedImage } = await import('./image-attach.service');
@@ -255,6 +384,25 @@ Produce ${slideCount} slides. imagePrompt = photography only; layout id is separ
   }
 
   const postFormat: SocialImageFormat = input.format || formatForPlatforms(input.platforms);
+  return { slideCount, planned, layouts, postFormat };
+}
+
+/** Draw the slides one by one, saving after each, starting after `done`. */
+async function renderCarouselSlides(
+  input: GenerateCarouselSlidesInput,
+  plan: CarouselPlan,
+  done: CarouselSlide[],
+  priorAttempts = 0,
+): Promise<GenerateCarouselSlidesResult> {
+  const { planned, layouts, postFormat } = plan;
+  const { attachGeneratedImage } = await import('./image-attach.service');
+  const { brandPosterFrame } = await import('../providers/images/poster-frame');
+  const engine = input.engine || ContentEngine.CALENDAR;
+  const isB2c = String(input.brandType || 'b2b').toLowerCase() === 'b2c';
+  const visualStyleId =
+    input.visualStyleId || (isB2c ? 'cinematic_photo' : 'professional_photo');
+  const logoUrl = preferOriginalLogoUrl(input.logoUrl) || input.logoUrl || null;
+  const contactChips = buildBrandContactChips(input.contacts || {});
   const format = SOCIAL_IMAGE_FORMATS[postFormat];
 
   const baseAttach = {
@@ -269,9 +417,23 @@ Produce ${slideCount} slides. imagePrompt = photography only; layout id is separ
     throwOnError: true,
   };
 
-  const slides: CarouselSlide[] = [];
-  for (let i = 0; i < planned.length; i++) {
+  const slides: CarouselSlide[] = [...done];
+  const progressBase = {
+    total: planned.length,
+    planned: planned as unknown as CarouselProgress['planned'],
+    layouts: layouts as string[],
+    contacts: contactChips,
+    format: postFormat,
+    resume: (() => {
+      const { tenantId: _t, contentId: _c, ...rest } = input;
+      void _t;
+      void _c;
+      return JSON.parse(JSON.stringify(rest)) as Record<string, unknown>;
+    })(),
+  };
+  for (let i = slides.length; i < planned.length; i++) {
     await assertGenerationActive(input.contentId);
+    try {
     const slide = planned[i]!;
     const isLast = i === planned.length - 1;
     const exactHero = (input.heroImageUrls?.[i] || '').trim();
@@ -330,6 +492,33 @@ Produce ${slideCount} slides. imagePrompt = photography only; layout id is separ
       posterSpec: slide.spec as unknown as Record<string, unknown>,
       posterLayout: slide.layout,
     });
+    // Save every finished slide at once: a later failure must not throw this one away.
+    if (input.persist !== false) {
+      await saveProgress(input.contentId, { ...progressBase, slides: [...slides] });
+    }
+    } catch (error) {
+      // A stop requested by the user is not a failure of the slide.
+      if (isGenerationAbortedError(error)) throw error;
+      const saved = slides.length;
+      const technical = error instanceof Error ? error.message : String(error);
+      if (input.persist !== false) {
+        await saveProgress(input.contentId, {
+          ...progressBase,
+          slides: [...slides],
+          failure: { slide: i + 1, message: technical.slice(0, 500), at: new Date().toISOString(), attempts: priorAttempts + 1 },
+        }).catch(() => undefined);
+      }
+      await executionLogService.log({
+        tenantId: input.tenantId,
+        contentId: input.contentId,
+        workflowStep: input.workflowStep || 'carousel:slides',
+        engine,
+        message: `Slide ${i + 1} of ${planned.length} failed (${saved} saved): ${technical.slice(0, 300)}`,
+      });
+      // Out-of-credit errors keep their own "Add money" alert; everything else gets the slide summary.
+      if (toProviderCreditError(error, undefined, 'image')) throw error;
+      throw new CarouselSlideError(i + 1, planned.length, saved, error);
+    }
   }
 
   const cover = slides[0]!;

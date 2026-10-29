@@ -17,6 +17,7 @@ import { notifySuccess, notifyError } from '../services/app-notification.service
 import { processDueAutomations } from '../services/automation.service';
 import { processDueCalendarPlanEntries } from '../services/calendar-plan-schedule.service';
 import { isGenerationAbortedError } from '../services/generation-abort.service';
+import { CarouselSlideError } from '../services/carousel-generate.service';
 
 let redisAvailable = false;
 let contentGenerationQueue: Queue | null = null;
@@ -96,6 +97,8 @@ interface GenerationJobData {
     hashtags?: string[];
     heroImageUrls?: Array<string | null | undefined>;
   };
+  /** Continue a carousel that stopped part-way (keeps finished slides and wording). */
+  resumeCarousel?: boolean;
   calendar?: {
     eventId?: string;
     eventYear?: number;
@@ -130,7 +133,7 @@ interface PublishingJobData {
 }
 
 async function runGeneration(data: GenerationJobData): Promise<void> {
-  const { contentId, tenantId, engine, trends, competitor, newsletter, calendar, meme, carousel } =
+  const { contentId, tenantId, engine, trends, competitor, newsletter, calendar, meme, carousel, resumeCarousel } =
     data;
   const trendsEngine = new TrendsEngine();
   const competitorEngine = new CompetitorEngine();
@@ -150,7 +153,23 @@ async function runGeneration(data: GenerationJobData): Promise<void> {
       return;
     }
 
-    switch (engine) {
+    if (resumeCarousel) {
+      const { resumeCarouselSlides } = await import('../services/carousel-generate.service');
+      await resumeCarouselSlides(tenantId, contentId);
+      // A retried post always goes to a person for review, even if the original run would have auto-posted.
+      await prisma.generatedContent.update({
+        where: { id: contentId },
+        data: { status: 'pending_approval', publishError: null },
+      });
+      await executionLogService.log({
+        tenantId,
+        contentId,
+        workflowStep: 'carousel:resume_complete',
+        engine,
+        status: ExecutionStatus.SUCCESS,
+        message: 'Missing slides finished — ready for approval',
+      });
+    } else switch (engine) {
       case ContentEngine.TRENDS:
         await trendsEngine.generate(tenantId, contentId, trends || {});
         break;
@@ -182,6 +201,10 @@ async function runGeneration(data: GenerationJobData): Promise<void> {
         throw new Error('Brand chat posts are created via Brand Studio chatbot, not the generate queue.');
     }
     const content = await prisma.generatedContent.findUniqueOrThrow({ where: { id: contentId } });
+    if (resumeCarousel) {
+      const { markPlanEntryByContentId } = await import('../services/calendar-plan-schedule.service');
+      await markPlanEntryByContentId(contentId, 'ready').catch(() => undefined);
+    }
     if (calendar?.planEntryId || calendar?.customPlan?.id) {
       const { markPlanEntryFromGeneration } = await import(
         '../services/calendar-plan-schedule.service'
@@ -243,6 +266,9 @@ async function runGeneration(data: GenerationJobData): Promise<void> {
         'failed',
         msg,
       ).catch(() => undefined);
+    } else if (resumeCarousel) {
+      const { markPlanEntryByContentId } = await import('../services/calendar-plan-schedule.service');
+      await markPlanEntryByContentId(contentId, 'failed', msg).catch(() => undefined);
     }
     await prisma.generatedContent.update({
       where: { id: contentId },
@@ -264,8 +290,20 @@ async function runGeneration(data: GenerationJobData): Promise<void> {
         data: { publishError: credit.message.slice(0, 500) },
       });
     } else {
-      await notifyWorkflowFailure('generate', msg, contentId, false, tenantId);
-      await notifyError(tenantId, 'Generation failed', msg, `/approvals/${contentId}`);
+      const slideFailure = error instanceof CarouselSlideError ? error : null;
+      await notifyWorkflowFailure(
+        slideFailure ? `generate · carousel slide ${slideFailure.slide} of ${slideFailure.total}` : 'generate',
+        msg,
+        contentId,
+        false,
+        tenantId,
+      );
+      await notifyError(
+        tenantId,
+        slideFailure ? `Carousel slide ${slideFailure.slide} of ${slideFailure.total} failed` : 'Generation failed',
+        msg,
+        `/approvals/${contentId}`,
+      );
     }
     throw error;
   }
@@ -363,6 +401,23 @@ export async function enqueueContentGeneration(
   }
 
   return content.id;
+}
+
+/** Queue a retry that continues an unfinished carousel from its first missing slide. */
+export async function enqueueCarouselResume(contentId: string, tenantId: string): Promise<void> {
+  const job: GenerationJobData = {
+    contentId,
+    tenantId,
+    engine: ContentEngine.CAROUSEL,
+    resumeCarousel: true,
+  };
+  if (redisAvailable && contentGenerationQueue) {
+    await contentGenerationQueue.add('generate', job);
+  } else {
+    setImmediate(() => {
+      runGeneration(job).catch((err) => console.error('[inline-generate]', err));
+    });
+  }
 }
 
 export async function enqueuePublishing(
