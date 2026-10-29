@@ -1355,7 +1355,7 @@ export default function ContentCalendarPage() {
                     </p>
                     <p>
                       <span className="font-semibold text-[hsl(var(--foreground))]">Format</span> can be{' '}
-                      <em>Static poster</em>, <em>Carousel (4 slides)</em> (2–5 slides) or <em>No image</em>.
+                      <em>Static poster</em>, <em>Carousel (4 slides)</em> (2–10 slides) or <em>No image</em>.
                     </p>
                     <p>
                       Not sure? Use the <strong>Excel template</strong> button above. For a single carousel, open{' '}
