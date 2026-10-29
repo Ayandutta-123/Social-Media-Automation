@@ -1621,6 +1621,9 @@ export default function ContentCalendarPage() {
                             {planVisualMode === 'ai_baked_layout'
                               ? CREATIVE_MODE_HINTS.ai_baked_layout
                               : 'One consistent style across the month. LLM layout + AI photo; brand palette on overlays.'}
+                            {stagedRefs.length > 0 && stagedRefMode !== 'off'
+                              ? ' Your style pictures guide the look of the image, so they take priority over this choice.'
+                              : ''}
                           </span>
                         </label>
                       )}

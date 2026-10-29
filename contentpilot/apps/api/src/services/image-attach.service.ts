@@ -708,9 +708,10 @@ export async function attachGeneratedImage(
     const kitVisuals = await resolveBrandKitVisuals(tenantId, contentId, brand.imageStyle);
     // Scene MUST stay first — FLUX truncates ~512 tokens; prepending kit made images look random.
     const { assembleFalPromptFrontLoaded } = await import('../lib/image-prompt-sanitize');
+    const { splitBrandDna: splitDna } = await import('../providers/images/social-frame');
     const promptWithKit = assembleFalPromptFrontLoaded(
       finalPrompt,
-      kitVisuals.artStyleLine ? [kitVisuals.artStyleLine] : [],
+      kitVisuals.artStyleLine && !splitDna(cleanPrompt).illustrated ? [kitVisuals.artStyleLine] : [],
       12000,
     );
 

@@ -1317,10 +1317,11 @@ export async function memeSocialFrame(opts: {
 export const BRAND_DNA_MARKER = 'BRAND VISUAL DNA';
 
 /** Separate the scene from the learned-look block so a long scene can never push the look out of the prompt. */
-export function splitBrandDna(prompt: string): { scene: string; dna: string } {
+export function splitBrandDna(prompt: string): { scene: string; dna: string; illustrated: boolean } {
   const at = prompt.indexOf(BRAND_DNA_MARKER);
-  if (at < 0) return { scene: prompt.trim(), dna: '' };
-  return { scene: prompt.slice(0, at).trim(), dna: prompt.slice(at).trim().slice(0, 1100) };
+  if (at < 0) return { scene: prompt.trim(), dna: '', illustrated: false };
+  const dna = prompt.slice(at).trim().slice(0, 1100);
+  return { scene: prompt.slice(0, at).trim(), dna, illustrated: dna.startsWith(`${BRAND_DNA_MARKER} [illustrated]`) };
 }
 
 /** Hard ban: AI must not paint words — we composite headline/CTA/logo in SVG. */
@@ -1353,7 +1354,9 @@ export function buildSocialImagePrompt(opts: {
 }): string {
   const format = opts.format || 'instagram_square';
   const { width, height, label } = SOCIAL_IMAGE_FORMATS[format];
-  const { scene: sceneOnly, dna: brandDna } = splitBrandDna(opts.basePrompt);
+  const { scene: sceneOnly, dna: dnaRaw, illustrated: illustratedLook } = splitBrandDna(opts.basePrompt);
+  // The [illustrated] tag steers this builder only; the model never sees it.
+  const brandDna = dnaRaw.replace(`${BRAND_DNA_MARKER} [illustrated]`, BRAND_DNA_MARKER);
   const base = sceneOnly;
   const placement: LogoPlacement = opts.logoPlacement || 'top-left';
   // Framed posts pass forbidInImageText; overlays also force a hard ban.
@@ -1396,10 +1399,13 @@ export function buildSocialImagePrompt(opts: {
     return [
       scene,
       brandDna,
-      'Photoreal, plausible real-world scene only — no outdoor servers, holographic buildings, floating HUDs or digital-twin wireframes.',
+      illustratedLook
+        ? 'Follow the brand look above exactly (not photographic); one clear subject that matches the topic — no holographic buildings, floating HUDs or wireframes.'
+        : 'Photoreal, plausible real-world scene only — no outdoor servers, holographic buildings, floating HUDs or digital-twin wireframes.',
       noText ? NO_IN_IMAGE_TEXT_SHORT : '',
       brief ? `Illustrate this topic and nothing else: “${brief.slice(0, 200)}”.` : '',
-      styleFromPreset ? `Style: ${styleFromPreset}` : '',
+      // A reference look replaces the preset style; otherwise the two fight each other.
+      styleFromPreset && !illustratedLook ? `Style: ${styleFromPreset}` : '',
       posterQualityGuardrails(noText),
       brand
         ? `Do not draw or invent a logo for ${brand}; leave the ${calmCorner} corner calm so a real logo badge can sit there.`
@@ -1419,7 +1425,7 @@ export function buildSocialImagePrompt(opts: {
     brief ? `Post topic: ${brief.slice(0, 360)}` : '',
     contentLock,
     `Finished agency-quality social creative for ${label} (${width}×${height}). Full-bleed LinkedIn / Instagram feed post — looks like a real B2B brand asset from GPT Image 2 / top creative agencies.`,
-    styleFromPreset
+    styleFromPreset && !illustratedLook
       ? `REQUIRED VISUAL STYLE: ${styleFromPreset}`
       : 'Premium B2B marketing look: refined hierarchy, intentional whitespace, professional finish.',
     noText

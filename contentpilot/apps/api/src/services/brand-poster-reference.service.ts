@@ -192,8 +192,10 @@ export function buildVarietyInstruction(
   const imageSeed = opts.imageSeed || seed;
   const primary = analysisOf(picked.members[stableIndex(`${imageSeed}:img`, picked.members.length)]);
 
+  // A drawn / vector / 3D look must not be pushed back to photography by the generic "photoreal" lines.
+  const illustrated = !/photo/i.test(primary.medium);
   const styleInstruction = [
-    `${BRAND_DNA_MARKER} — use this look only (${picked.key}); do not mix in other looks.`,
+    `${BRAND_DNA_MARKER}${illustrated ? ' [illustrated]' : ''} — use this look only (${picked.key}); do not mix in other looks.`,
     compactDna(primary),
     'New subject for THIS post. Never reproduce readable text, logos or faces from the references.',
   ].join(' ');
