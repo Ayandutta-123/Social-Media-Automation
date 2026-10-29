@@ -93,3 +93,17 @@ docker compose up -d --build
 ```
 
 Volumes keep DB + uploads. If you change `INTERNAL_API_URL` / API service name, rebuild the **web** image (rewrites are baked at build time).
+
+## Notes for this update (carousel retry, calendar style pictures, per-company API keys)
+
+1. **Back up first** (see Backup above). Rolling back = restore the dump and redeploy the previous image.
+2. **Database:** the API runs `prisma db push` on start. This update only *adds* columns with safe defaults
+   (`brand_poster_references.scope` / `plan_id`, `content_calendar_plans.reference_mode`). Existing rows and uploads are untouched.
+   If the log shows a `prisma db push warning` at start-up, stop and check it — do not ignore it.
+3. **New optional env var** `SERVER_KEYS_FOR_TENANTS_CREATED_BEFORE` (default `2026-10-28T00:00:00Z`).
+   Companies created before that date keep using the server's `.env` provider keys; newer companies must add their own in
+   Settings → Integrations. Use `all` to keep the old behaviour for everyone, `none` to require own keys from everyone.
+4. **Behaviour changes:** an unfinished carousel cannot be approved/posted until "Retry missing slides" finishes it;
+   Approvals returns "not found" for another company's post; Slack/Teams/email alert targets from `.env` are used only
+   by companies allowed to use server keys.
+5. **After deploy, check:** `GET /health`, log in, open an old carousel in Approvals, open Content Calendar → My content plans.
