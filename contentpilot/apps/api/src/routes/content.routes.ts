@@ -1028,6 +1028,64 @@ export async function contentRoutes(app: FastifyInstance) {
     }
   });
 
+  // ── Style pictures attached to a calendar plan ("make my posters look like these") ──
+  app.get('/calendar/plan/references', { preHandler: requireAuth }, async (request) => {
+    const q = z.object({ planId: z.string().uuid().optional() }).parse(request.query ?? {});
+    const { listPlanReferences } = await import('../services/calendar-plan-references.service');
+    const references = await listPlanReferences(request.session.tenantId!, q.planId ?? null);
+    return { success: true, data: { references, max: 10 } };
+  });
+
+  app.post('/calendar/plan/references', { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) }, async (request, reply) => {
+    const q = z.object({ planId: z.string().uuid().optional() }).parse(request.query ?? {});
+    const data = await request.file();
+    if (!data) return reply.status(400).send({ success: false, error: 'No picture uploaded.' });
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(data.mimetype)) {
+      return reply.status(400).send({ success: false, error: 'Please upload a PNG, JPG or WebP picture.' });
+    }
+    const buffer = await data.toBuffer();
+    if (buffer.length > 20 * 1024 * 1024) {
+      return reply.status(400).send({ success: false, error: 'Picture too large (max 20 MB).' });
+    }
+    const { addPlanReference } = await import('../services/calendar-plan-references.service');
+    try {
+      const reference = await addPlanReference({
+        tenantId: request.session.tenantId!,
+        planId: q.planId ?? null,
+        buffer,
+        filename: data.filename || 'style.png',
+        mimetype: data.mimetype,
+      });
+      return { success: true, data: { reference } };
+    } catch (err) {
+      const { replyProviderCredit } = await import('../services/provider-credit-alert.service');
+      if (await replyProviderCredit(reply, request.session.tenantId, err, 'caption')) return;
+      const message = err instanceof Error ? err.message : 'Could not read this picture.';
+      const limit = /up to \d+ style pictures|not found/i.test(message);
+      return reply.status(limit ? 409 : 502).send({ success: false, error: message });
+    }
+  });
+
+  app.delete('/calendar/plan/references/:id', { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+    const { removePlanReference } = await import('../services/calendar-plan-references.service');
+    const removed = await removePlanReference(request.session.tenantId!, id);
+    if (!removed) return reply.status(404).send({ success: false, error: 'Style picture not found.' });
+    return { success: true, data: { id } };
+  });
+
+  app.put('/calendar/plan/saved/:planId/reference-mode', { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) }, async (request, reply) => {
+    const { planId } = z.object({ planId: z.string().uuid() }).parse(request.params);
+    const body = z.object({ mode: z.enum(['off', 'guide', 'strong']) }).parse(request.body ?? {});
+    const { setPlanReferenceMode } = await import('../services/calendar-plan-references.service');
+    try {
+      const data = await setPlanReferenceMode(request.session.tenantId!, planId, body.mode);
+      return { success: true, data };
+    } catch (err) {
+      return reply.status(400).send({ success: false, error: err instanceof Error ? err.message : 'Could not update.' });
+    }
+  });
+
   app.post('/calendar/plan/save', { preHandler: requireRole(UserRole.ADMIN, UserRole.REVIEWER) }, async (request, reply) => {
     const body = z
       .object({
@@ -1041,6 +1099,9 @@ export async function contentRoutes(app: FastifyInstance) {
         visualMode: z.enum(['existing_template', 'ai', 'ai_baked_layout']).optional().default('ai'),
         visualStyleId: z.string().max(60).optional(),
         brandTemplateId: z.string().uuid().optional().nullable(),
+        /** Style pictures uploaded in the calendar screen before saving, and whether to follow them. */
+        referenceIds: z.array(z.string().uuid()).max(10).optional().default([]),
+        referenceMode: z.enum(['off', 'guide', 'strong']).optional().default('off'),
         entries: z
           .array(
             z.object({
@@ -1121,6 +1182,16 @@ export async function contentRoutes(app: FastifyInstance) {
             entries,
           }),
         );
+      }
+
+      if (body.referenceIds.length) {
+        const { attachStagedReferences } = await import('../services/calendar-plan-references.service');
+        await attachStagedReferences({
+          tenantId: request.session.tenantId!,
+          planIds: plans.map((plan) => plan.id),
+          referenceIds: body.referenceIds,
+          mode: body.referenceMode,
+        });
       }
 
       const allEntries = plans.flatMap((plan) => plan.entries);

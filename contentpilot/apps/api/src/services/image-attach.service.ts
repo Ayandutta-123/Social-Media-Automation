@@ -325,6 +325,7 @@ export async function generateRawArtUrl(
         designSource: opts.designSource,
         topicHint: opts.dnaImageSeed ? undefined : imagePrompt,
         imageSeed: opts.dnaImageSeed,
+        contentId,
       });
       if (guidance.styleInstruction) {
         guidedPrompt = `${guidedPrompt}\n\n${guidance.styleInstruction}`;
@@ -418,6 +419,7 @@ export async function attachGeneratedImage(
         // Carousels keep one look across slides, so they are not re-matched per slide prompt.
         topicHint: opts.dnaImageSeed ? undefined : cleanPrompt,
         imageSeed: opts.dnaImageSeed,
+        contentId,
       });
       if (guidance.styleInstruction) {
         cleanPrompt = `${cleanPrompt}\n\n${guidance.styleInstruction}`;

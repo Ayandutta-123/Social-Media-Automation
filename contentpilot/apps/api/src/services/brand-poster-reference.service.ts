@@ -203,7 +203,7 @@ export function buildVarietyInstruction(
 
 export async function refreshPosterVisualProfile(tenantId: string): Promise<string> {
   const references = await prisma.brandPosterReference.findMany({
-    where: { tenantId, isActive: true },
+    where: { tenantId, isActive: true, scope: 'brand' },
     select: { label: true, styleBrief: true, styleProfile: true, varietyKey: true, imageUrl: true },
     orderBy: { createdAt: 'desc' },
     take: MAX_BRAND_POSTER_REFERENCES,
@@ -225,6 +225,27 @@ function stableIndex(seed: string, length: number): number {
   return Math.abs(hash) % Math.max(1, length);
 }
 
+/** The calendar plan (and its reference pictures) that a generated post belongs to, if any. */
+async function planReferencesFor(
+  tenantId: string,
+  contentId: string | undefined,
+): Promise<{ mode: PosterReferenceMode; references: StoredReference[] } | null> {
+  if (!contentId) return null;
+  const entry = await prisma.contentCalendarPlanEntry.findFirst({
+    where: { contentId, plan: { tenantId, deletedAt: null } },
+    select: { plan: { select: { id: true, referenceMode: true } } },
+  });
+  const plan = entry?.plan;
+  if (!plan || !isPosterReferenceMode(plan.referenceMode) || plan.referenceMode === 'off') return null;
+  const references = await prisma.brandPosterReference.findMany({
+    where: { tenantId, planId: plan.id, scope: 'plan', isActive: true },
+    select: { imageUrl: true, label: true, styleBrief: true, styleProfile: true, varietyKey: true },
+    orderBy: { createdAt: 'asc' },
+    take: MAX_BRAND_POSTER_REFERENCES,
+  });
+  return references.length ? { mode: plan.referenceMode, references } : null;
+}
+
 export async function resolvePosterVisualGuidance(opts: {
   tenantId: string;
   seed: string;
@@ -239,39 +260,48 @@ export async function resolvePosterVisualGuidance(opts: {
   topicHint?: string;
   /** Picks the reference image inside the variety; carousels pass a per-slide seed so slides differ. */
   imageSeed?: string;
+  /**
+   * The post being made. When it belongs to a calendar plan that has its own reference pictures and
+   * the plan's switch is on, those are used instead of the company library.
+   */
+  contentId?: string;
 }): Promise<{
   mode: PosterReferenceMode;
   styleInstruction: string;
   referenceImageUrl: string | null;
   referenceStrength?: number;
 }> {
-  const settings = await prisma.brandSettings.findUnique({
-    where: { tenantId: opts.tenantId },
-    select: { posterReferenceMode: true, posterVisualProfile: true },
-  });
-  const mode = isPosterReferenceMode(settings?.posterReferenceMode)
-    ? settings.posterReferenceMode
-    : 'off';
-  if (
-    mode === 'off' ||
-    opts.hasExplicitReference ||
-    opts.designSource === 'brand_template'
-  ) {
-    return { mode, styleInstruction: '', referenceImageUrl: null };
+  if (opts.hasExplicitReference || opts.designSource === 'brand_template') {
+    return { mode: 'off', styleInstruction: '', referenceImageUrl: null };
   }
 
-  const references = await prisma.brandPosterReference.findMany({
-    where: { tenantId: opts.tenantId, isActive: true },
-    select: {
-      imageUrl: true,
-      label: true,
-      styleBrief: true,
-      styleProfile: true,
-      varietyKey: true,
-    },
-    orderBy: { createdAt: 'asc' },
-    take: MAX_BRAND_POSTER_REFERENCES,
-  });
+  // A calendar plan with its own style pictures wins over the company library.
+  const planRefs = await planReferencesFor(opts.tenantId, opts.contentId).catch(() => null);
+  let mode: PosterReferenceMode;
+  let references: StoredReference[];
+  if (planRefs) {
+    mode = planRefs.mode;
+    references = planRefs.references;
+  } else {
+    const settings = await prisma.brandSettings.findUnique({
+      where: { tenantId: opts.tenantId },
+      select: { posterReferenceMode: true, posterVisualProfile: true },
+    });
+    mode = isPosterReferenceMode(settings?.posterReferenceMode) ? settings.posterReferenceMode : 'off';
+    if (mode === 'off') return { mode, styleInstruction: '', referenceImageUrl: null };
+    references = await prisma.brandPosterReference.findMany({
+      where: { tenantId: opts.tenantId, isActive: true, scope: 'brand' },
+      select: {
+        imageUrl: true,
+        label: true,
+        styleBrief: true,
+        styleProfile: true,
+        varietyKey: true,
+      },
+      orderBy: { createdAt: 'asc' },
+      take: MAX_BRAND_POSTER_REFERENCES,
+    });
+  }
 
   if (!references.length) {
     return { mode, styleInstruction: '', referenceImageUrl: null };

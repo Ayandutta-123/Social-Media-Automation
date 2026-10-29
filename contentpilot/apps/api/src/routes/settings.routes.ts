@@ -439,7 +439,7 @@ export async function settingsRoutes(app: FastifyInstance) {
         select: { posterReferenceMode: true, posterVisualProfile: true },
       }),
       prisma.brandPosterReference.findMany({
-        where: { tenantId, isActive: true },
+        where: { tenantId, isActive: true, scope: 'brand' },
         orderBy: { createdAt: 'desc' },
       }),
     ]);
@@ -460,7 +460,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const tenantId = request.session.tenantId!;
       const count = await prisma.brandPosterReference.count({
-        where: { tenantId, isActive: true },
+        where: { tenantId, isActive: true, scope: 'brand' },
       });
       if (count >= 20) {
         return reply.status(409).send({
@@ -493,7 +493,7 @@ export async function settingsRoutes(app: FastifyInstance) {
         const reference = await prisma.$transaction(
           async (tx) => {
             const activeCount = await tx.brandPosterReference.count({
-              where: { tenantId, isActive: true },
+              where: { tenantId, isActive: true, scope: 'brand' },
             });
             if (activeCount >= 20) throw new Error('POSTER_REFERENCE_LIMIT');
             return tx.brandPosterReference.create({
@@ -544,7 +544,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       const tenantId = request.session.tenantId!;
       const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
       const reference = await prisma.brandPosterReference.findFirst({
-        where: { id, tenantId, isActive: true },
+        where: { id, tenantId, isActive: true, scope: 'brand' },
       });
       if (!reference) {
         return reply.status(404).send({ success: false, error: 'Poster reference not found' });

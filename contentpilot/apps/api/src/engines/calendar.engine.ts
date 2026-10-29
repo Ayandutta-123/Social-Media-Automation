@@ -135,6 +135,14 @@ export class CalendarEngine {
         }
       : null;
 
+    // Link the plan entry to this draft right away (the scheduler only does it after queuing), so image
+    // generation can find the plan's style pictures even on the very first run.
+    if (custom && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(custom.id)) {
+      await prisma.contentCalendarPlanEntry
+        .updateMany({ where: { id: custom.id, plan: { tenantId } }, data: { contentId } })
+        .catch(() => undefined);
+    }
+
     const event = !custom && opts.eventId ? await resolveFestivalEvent(opts.eventId, opts.eventYear) : null;
     if (!custom && !event) {
       throw new Error(

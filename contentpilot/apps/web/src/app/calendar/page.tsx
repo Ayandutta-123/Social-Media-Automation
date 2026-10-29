@@ -25,6 +25,7 @@ import { CreativeModePicker, type CreativeVisualMode, CREATIVE_MODE_LABELS, CREA
 import { abortContentGeneration, isAbortError } from '@/lib/abort';
 import { notifyError, notifySuccess, toast } from '@/lib/toast';
 import { CalendarAiWizard, type AiWizardEntry } from '@/components/calendar-ai-wizard';
+import { PlanReferenceStyles, type PlanStyleMode, type PlanStyleReference } from '@/components/plan-reference-styles';
 
 type RegionId = 'india' | 'gcc' | 'europe' | 'usa' | 'global';
 type CategoryId = 'tech' | 'festival' | 'national' | 'observance';
@@ -162,6 +163,9 @@ type SavedPlan = {
   visualStyleId?: string;
   status: string;
   createdAt?: string;
+  /** off | guide | strong — follow this calendar's own style pictures */
+  referenceMode?: PlanStyleMode;
+  references?: PlanStyleReference[];
   entries: SavedPlanEntry[];
 };
 
@@ -314,6 +318,9 @@ export default function ContentCalendarPage() {
   const [planTimezone, setPlanTimezone] = useState('Asia/Kolkata');
   const [planExecutionMode, setPlanExecutionMode] = useState<'automatic' | 'manual'>('automatic');
   const [planName, setPlanName] = useState('');
+  /** Style pictures uploaded for the calendar being created (they join it when saved). */
+  const [stagedRefs, setStagedRefs] = useState<PlanStyleReference[]>([]);
+  const [stagedRefMode, setStagedRefMode] = useState<PlanStyleMode>('off');
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
   const [deletingPlanId, setDeletingPlanId] = useState('');
   const [generatingEntryId, setGeneratingEntryId] = useState('');
@@ -321,6 +328,22 @@ export default function ContentCalendarPage() {
   const [planTimezoneOptions, setPlanTimezoneOptions] = useState<string[]>(['Asia/Kolkata']);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const unsavedLeaveConfirmedRef = useRef(false);
+
+  // Style pictures uploaded earlier for a calendar that was never saved are still waiting on the server.
+  useEffect(() => {
+    let cancelled = false;
+    api<{ data: { references: PlanStyleReference[] } }>('/content/calendar/plan/references')
+      .then((res) => {
+        if (cancelled) return;
+        const list = res.data.references || [];
+        setStagedRefs(list);
+        if (list.length) setStagedRefMode((m) => (m === 'off' ? 'guide' : m));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadMeta = useCallback(async () => {
     const metaRes = await api<{
@@ -783,10 +806,19 @@ export default function ContentCalendarPage() {
           visualMode: planVisualMode,
           visualStyleId: planVisualStyleId,
           brandTemplateId: planVisualMode === 'existing_template' ? brandTemplateId : null,
+          // Style pictures only apply to AI-made posters; Brand Studio templates keep their own design.
+          referenceIds:
+            planVisualMode === 'existing_template' ? [] : stagedRefs.map((r) => r.id),
+          referenceMode:
+            planVisualMode === 'existing_template' || !stagedRefs.length ? 'off' : stagedRefMode,
         },
       });
       setOkMsg(res.data.message);
       notifySuccess('Plan saved');
+      if (planVisualMode !== 'existing_template') {
+        setStagedRefs([]);
+        setStagedRefMode('off');
+      }
       setPlanEntries([]);
       setSelectedPlanIds([]);
       setPlanText('');
@@ -1240,24 +1272,26 @@ export default function ContentCalendarPage() {
                 </div>
               </div>
               <div className="panel-body space-y-5">
-                <div className="cal-hero">
-                  <div className="relative z-[1] space-y-3">
-                    <div className="inline-flex items-center gap-2 rounded-full border border-teal-500/25 bg-teal-500/10 px-2.5 py-1 text-[11px] font-semibold text-teal-800 dark:text-teal-200">
-                      <FileSpreadsheet size={12} />
-                      Excel · CSV upload
-                    </div>
-                    <p className="max-w-2xl text-sm leading-relaxed text-[hsl(var(--muted-foreground))]">
-                      Drop an <strong className="font-semibold text-[hsl(var(--foreground))]">.xlsx</strong> or
-                      CSV. We keep exact day <strong className="font-semibold text-[hsl(var(--foreground))]">Detail</strong>{' '}
-                      (hook, angle, CTA, notes) and the{' '}
-                      <strong className="font-semibold text-[hsl(var(--foreground))]">format</strong> column —{' '}
-                      <strong className="font-semibold text-[hsl(var(--foreground))]">Static poster</strong>,{' '}
-                      <strong className="font-semibold text-[hsl(var(--foreground))]">Carousel</strong>, or{' '}
-                      <strong className="font-semibold text-[hsl(var(--foreground))]">No image</strong> — then you save.
-                      Teal cards on the month grid are only your plan.
-                    </p>
-                  </div>
-                </div>
+                <ol className="grid gap-2 sm:grid-cols-3" aria-label="How it works">
+                  {[
+                    ['1', 'Upload your sheet', 'Excel or CSV, one row per day'],
+                    ['2', 'Pick the days', 'Choose which ideas to schedule'],
+                    ['3', 'Save', 'Drafts appear in Approvals — nothing posts without you'],
+                  ].map(([n, title, hint]) => (
+                    <li
+                      key={n}
+                      className="flex items-start gap-3 rounded-xl border border-teal-500/25 bg-teal-500/5 px-3 py-2.5"
+                    >
+                      <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-teal-600 text-xs font-bold text-white">
+                        {n}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold">{title}</span>
+                        <span className="block text-xs leading-snug text-[hsl(var(--muted-foreground))]">{hint}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ol>
 
                 <div
                   className="cal-dropzone"
@@ -1279,38 +1313,72 @@ export default function ContentCalendarPage() {
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-500/10 text-teal-700 animate-float dark:text-teal-300">
                     <Upload size={22} />
                   </div>
-                  <p className="text-sm font-semibold">Drop Excel here, or browse</p>
-                  <p className="helper-text">
-                    Preferred: .xlsx with columns date, title, theme, opening hook, angle, cta,
-                    format (e.g. Carousel (4 slides) — 2–5 slides). Or build one ad‑hoc in{' '}
-                    <Link href="/carousel" className="text-brand-600 underline">
-                      Carousel
-                    </Link>
-                    .
-                  </p>
-                  <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".xlsx,.xls,.csv,.txt,.tsv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,text/plain"
-                      className="hidden"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0] || null;
-                        void onPlanFile(f);
-                        e.target.value = '';
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="btn-secondary btn-sm inline-flex items-center gap-1.5"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={parsingPlan}
-                    >
-                      <FileSpreadsheet size={14} />
-                      {parsingPlan ? 'Reading file…' : 'Upload Excel / CSV'}
-                    </button>
-                  </div>
+                  <p className="text-base font-semibold">Upload your content plan</p>
+                  <p className="helper-text">Drop an Excel or CSV file here, or choose one.</p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv,.txt,.tsv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,text/plain"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] || null;
+                      void onPlanFile(f);
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn-sector mt-1 inline-flex min-h-[48px] w-full max-w-xs items-center justify-center gap-2"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={parsingPlan}
+                  >
+                    <FileSpreadsheet size={16} />
+                    {parsingPlan ? 'Reading file…' : 'Choose Excel / CSV file'}
+                  </button>
                 </div>
+
+                <details className="group rounded-xl border border-[hsl(var(--border))] px-3 py-2.5">
+                  <summary className="flex min-h-[32px] cursor-pointer list-none items-center justify-between gap-2 text-sm font-medium">
+                    <span>What should my sheet look like?</span>
+                    <ChevronDown size={16} className="shrink-0 transition-transform group-open:rotate-180" />
+                  </summary>
+                  <div className="mt-3 space-y-3 text-xs leading-relaxed text-[hsl(var(--muted-foreground))]">
+                    <p>
+                      <span className="font-semibold text-[hsl(var(--foreground))]">Needed:</span>{' '}
+                      <span className="rounded-md bg-teal-500/10 px-1.5 py-0.5 font-medium text-teal-800 dark:text-teal-200">Date</span>{' '}
+                      <span className="rounded-md bg-teal-500/10 px-1.5 py-0.5 font-medium text-teal-800 dark:text-teal-200">Title</span>{' '}
+                      <span className="rounded-md bg-teal-500/10 px-1.5 py-0.5 font-medium text-teal-800 dark:text-teal-200">Format</span>
+                    </p>
+                    <p>
+                      <span className="font-semibold text-[hsl(var(--foreground))]">Helpful:</span> Theme, Opening hook,
+                      Angle, CTA, Notes — we keep each day’s text exactly as written.
+                    </p>
+                    <p>
+                      <span className="font-semibold text-[hsl(var(--foreground))]">Format</span> can be{' '}
+                      <em>Static poster</em>, <em>Carousel (4 slides)</em> (2–5 slides) or <em>No image</em>.
+                    </p>
+                    <p>
+                      Not sure? Use the <strong>Excel template</strong> button above. For a single carousel, open{' '}
+                      <Link href="/carousel" className="text-brand-600 underline">
+                        Carousel
+                      </Link>
+                      .
+                    </p>
+                  </div>
+                </details>
+
+                <PlanReferenceStyles
+                  planId={null}
+                  references={stagedRefs}
+                  onReferencesChange={setStagedRefs}
+                  mode={stagedRefMode}
+                  onModeChange={setStagedRefMode}
+                  note={
+                    planVisualMode === 'existing_template'
+                      ? 'Not used while this calendar uses a Brand Studio template — the template keeps its own design.'
+                      : undefined
+                  }
+                />
 
                 {planWarnings.length > 0 && (
                   <ul className="space-y-1 rounded-xl border border-amber-500/25 bg-amber-500/5 px-3 py-2.5 text-xs text-amber-800 animate-fade-in dark:text-amber-200">
@@ -1635,6 +1703,49 @@ export default function ContentCalendarPage() {
                               {deletingPlanId === plan.id ? 'Deleting…' : 'Delete'}
                             </button>
                           </div>
+                          {plan.visualMode !== 'existing_template' && (
+                            <details className="group mt-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 py-2">
+                              <summary className="flex min-h-[36px] cursor-pointer list-none items-center justify-between gap-2 text-xs font-semibold">
+                                <span>
+                                  Style pictures · {(plan.references || []).length}
+                                  <span className="ml-1 font-normal text-[hsl(var(--muted-foreground))]">
+                                    {(plan.references || []).length === 0
+                                      ? '(none — normal look)'
+                                      : plan.referenceMode && plan.referenceMode !== 'off'
+                                        ? '(AI follows them)'
+                                        : '(off)'}
+                                  </span>
+                                </span>
+                                <ChevronDown size={14} className="shrink-0 transition-transform group-open:rotate-180" />
+                              </summary>
+                              <div className="mt-2">
+                                <PlanReferenceStyles
+                                  planId={plan.id}
+                                  references={plan.references || []}
+                                  onReferencesChange={(next) =>
+                                    setSavedPlans((list) =>
+                                      list.map((p) => (p.id === plan.id ? { ...p, references: next } : p)),
+                                    )
+                                  }
+                                  mode={plan.referenceMode || 'off'}
+                                  onModeChange={async (mode) => {
+                                    try {
+                                      await api(`/content/calendar/plan/saved/${plan.id}/reference-mode`, {
+                                        method: 'PUT',
+                                        body: { mode },
+                                      });
+                                      setSavedPlans((list) =>
+                                        list.map((p) => (p.id === plan.id ? { ...p, referenceMode: mode } : p)),
+                                      );
+                                    } catch (e) {
+                                      notifyError(e instanceof Error ? e.message : 'Could not update');
+                                      throw e;
+                                    }
+                                  }}
+                                />
+                              </div>
+                            </details>
+                          )}
                         </div>
                       ))}
                     </div>

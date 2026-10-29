@@ -175,12 +175,17 @@ model BrandPosterReference {
   width      Int?
   height     Int?
   isActive   Boolean  @default(true) @map("is_active")
+  /// brand = the company-wide library in Settings | plan = style pictures attached to one calendar plan
+  scope      String   @default("brand")
+  /// Calendar plan this picture belongs to. Null while scope=plan means "uploaded, not saved with a plan yet".
+  planId     String?  @map("plan_id")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, isActive, createdAt])
+  @@index([planId, isActive])
   @@map("brand_poster_references")
 }
 
@@ -567,6 +572,8 @@ model ContentCalendarPlan {
   /// Visual style preset id used for AI art (see VISUAL_STYLE_PRESETS)
   visualStyleId   String    @default("professional_photo") @map("visual_style_id")
   brandTemplateId String?   @map("brand_template_id")
+  /// off | guide | strong — follow the plan's own reference pictures (BrandPosterReference scope=plan) when making posters
+  referenceMode   String    @default("off") @map("reference_mode")
   /// active | archived
   status          String    @default("active")
   deletedAt       DateTime? @map("deleted_at")

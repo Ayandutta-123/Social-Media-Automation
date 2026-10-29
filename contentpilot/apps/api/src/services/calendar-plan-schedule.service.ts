@@ -164,6 +164,16 @@ export async function saveContentCalendarPlan(opts: {
 
 export async function listContentCalendarPlans(tenantId: string, year?: number, month?: number) {
   await reconcilePlanEntriesForTenant(tenantId);
+  const plans = await listPlansRaw(tenantId, year, month);
+  const { referencesByPlan } = await import('./calendar-plan-references.service');
+  const refs = await referencesByPlan(
+    tenantId,
+    plans.map((p) => p.id),
+  );
+  return plans.map((plan) => ({ ...plan, references: refs.get(plan.id) || [] }));
+}
+
+function listPlansRaw(tenantId: string, year?: number, month?: number) {
   return prisma.contentCalendarPlan.findMany({
     where: {
       tenantId,
