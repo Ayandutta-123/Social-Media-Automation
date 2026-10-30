@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The separate ContentPilot app lives in contentpilot/ and has its own tooling.
+    "contentpilot/**",
   ]),
 ]);
 

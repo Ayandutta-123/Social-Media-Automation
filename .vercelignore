@@ -1,0 +1,3 @@
+# ContentPilot is deployed separately (Docker, see contentpilot/DEPLOY.md); keep it out of this project build.
+contentpilot
+contentpilot-main 1.zip
